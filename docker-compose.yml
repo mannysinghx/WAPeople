@@ -1,0 +1,61 @@
+name: wapeople
+
+# WA People — Washington State legislation, votes and Supreme Court policy cases.
+# Everything here is open source: PostgreSQL, Python, FastAPI, Jinja2.
+#
+#   docker compose up -d --build          # start database + website + daily sync
+#   docker compose run --rm sync python -m wapeople.sync initial   # first data load
+#
+# Data lives in the named volume "wapeople_pgdata" and survives restarts/rebuilds.
+# Back it up with scripts/backup.sh.
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql://wapeople:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/wapeople
+  COURTLISTENER_API_TOKEN: ${COURTLISTENER_API_TOKEN:-}
+  COURT_CASES_SINCE: ${COURT_CASES_SINCE:-1991-01-01}
+  SYNC_HOUR_LOCAL: ${SYNC_HOUR_LOCAL:-5}
+  TZ: America/Los_Angeles
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wapeople
+      POSTGRES_USER: wapeople
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      TZ: America/Los_Angeles
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Localhost only. Change the left-hand port if 55440 is taken.
+      - "127.0.0.1:${DB_HOST_PORT:-55440}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wapeople -d wapeople"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build: ./app
+    restart: unless-stopped
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT:-8095}:8000"
+    command: ["sh", "-c", "python -m wapeople.migrate && uvicorn wapeople.web.main:app --host 0.0.0.0 --port 8000 --proxy-headers --workers 2"]
+
+  sync:
+    build: ./app
+    restart: unless-stopped
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "wapeople.sync", "schedule"]
+
+volumes:
+  pgdata:
+    name: wapeople_pgdata

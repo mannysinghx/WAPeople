@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}WA People{% endblock %} · WA People</title>
+  <meta name="description" content="{% block description %}Washington State bills, sponsors, roll-call votes, and Supreme Court decisions about legislation and public policy.{% endblock %}">
+  <link rel="stylesheet" href="/static/style.css?v=1">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e5b49'/%3E%3Cpath d='M7 23V12l9-5 9 5v11M10 23v-8m4 8v-8m4 8v-8m4 8v-8M6 24h20' stroke='white' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <script src="/static/app.js?v=1" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="WA People home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 23V12l9-5 9 5v11M10 23v-8m4 8v-8m4 8v-8m4 8v-8M6 24h20" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      WA People
+    </a>
+    <nav class="nav" aria-label="Main">
+      {% set nav = [("/bills", "Bills"), ("/legislators", "Legislators"), ("/votes", "Votes"), ("/court", "Supreme Court"), ("/about", "About")] %}
+      {% for href, label in nav %}
+      <a href="{{ href }}"{% if path.startswith(href) %} aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+    <form class="header-search" action="/search" role="search">
+      <label class="sr-only" for="hq">Search</label>
+      <input id="hq" type="search" name="q" placeholder="Search bills, people, cases  ( / )" autocomplete="off">
+    </form>
+  </div>
+</header>
+<main id="main" class="wrap">
+{% block content %}{% endblock %}
+</main>
+<footer class="site-footer">
+  <div class="wrap spread">
+    <div>
+      Data: <a href="https://wslwebservices.leg.wa.gov/">Washington State Legislature web services</a> ·
+      <a href="https://www.courtlistener.com/">CourtListener</a> (Free Law Project) ·
+      <a href="https://www.courts.wa.gov/opinions/">Washington Courts</a>.
+      Not an official government site — always confirm with the official source.
+    </div>
+    <div>
+      {% if updated.get("legislature") %}Bills updated {{ updated["legislature"] | date }}{% endif %}
+      {% if updated.get("courts") %} · Cases updated {{ updated["courts"] | date }}{% endif %}
+      · <a href="/about">How this works</a>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% from "_macros.html" import stage_badge, member_tag, result_badge, category_badges, vote_bar %}
+{% block title %}Washington State legislation, in plain view{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Washington State legislation, in plain view</h1>
+  <p class="lead">Every bill since 1991: who proposed it, how far it got, and how each legislator voted. Plus the Washington Supreme Court decisions that shaped those laws.</p>
+  <form class="big-search" action="/search" role="search">
+    <label class="sr-only" for="q">Search</label>
+    <input id="q" type="search" name="q" placeholder="Try “HB 1217”, “rent”, “capital gains”, or a legislator’s name" autofocus>
+    <button class="btn" type="submit">Search</button>
+  </form>
+</section>
+
+{% if cur %}
+<div class="banner{% if cur.status == 'in_session' %} live{% endif %}" role="status">
+  {% if cur.status == "in_session" %}
+    <strong>The Legislature is in session ({{ cur.id | biennium }}).</strong>
+    Bills are moving now. Activity was last recorded {{ cur.last_activity_date | date }}.
+  {% elif cur.status == "interim" %}
+    <strong>The Legislature is between sessions.</strong>
+    Bills from {{ cur.id | biennium }} that did not pass carry over to the session that starts {{ next_session | date(True) }}.
+  {% elif cur.status == "adjourned_final" %}
+    <strong>The {{ cur.id | biennium }} Legislature has adjourned for good.</strong>
+    Bills that did not pass have died. The next regular session convenes {{ next_session.strftime("%A") }}, {{ next_session | date(True) }}; bills prefiled for it will appear under <a href="/bills?bucket=proposed">Proposed</a>.
+  {% else %}
+    <strong>{{ cur.id | biennium }} session</strong>
+  {% endif %}
+  {% for u in upcoming %}<br>Bills are being prefiled for the {{ u.id | biennium }} Legislature — <a href="/bills?biennium={{ u.id }}">see them</a>.{% endfor %}
+</div>
+{% endif %}
+
+<section class="grid-3" style="margin-top:1.25rem" aria-label="Bills by stage">
+  <a class="card card-link bucket proposed" href="/bills?bucket=proposed">
+    <div class="num">{{ "{:,}".format(counts.proposed) }}</div>
+    <div class="label">Proposed bills</div>
+    <p>Prefiled or introduced and waiting in committee.</p>
+  </a>
+  <a class="card card-link bucket ongoing" href="/bills?bucket=ongoing">
+    <div class="num">{{ "{:,}".format(counts.ongoing) }}</div>
+    <div class="label">Ongoing bills</div>
+    <p>Out of committee, passed one chamber, or waiting for the Governor.</p>
+  </a>
+  <a class="card card-link bucket past" href="/bills?bucket=past">
+    <div class="num">{{ "{:,}".format(counts.past) }}</div>
+    <div class="label">Past bills</div>
+    <p>Enacted, vetoed, or did not pass — every session since 1991.</p>
+  </a>
+</section>
+
+{% if cur and counts.cur_bills %}
+<p class="muted small" style="margin-top:.75rem">
+  {{ cur.id | biennium }} so far: {{ "{:,}".format(counts.cur_bills) }} bills introduced ·
+  <a href="/bills?biennium={{ cur.id }}&stage=enacted">{{ counts.cur_laws }} enacted</a> ·
+  <a href="/bills?biennium={{ cur.id }}&stage=vetoed">{{ counts.cur_vetoed }} vetoed</a>
+  {% if counts.cur_dead %}· <a href="/bills?biennium={{ cur.id }}&stage=did_not_pass">{{ "{:,}".format(counts.cur_dead) }} did not pass</a>{% endif %}
+</p>
+{% endif %}
+
+<div class="grid-2" style="margin-top:1.5rem">
+  {% if moving %}
+  <section class="card">
+    <div class="panel-head"><h2>Moving now</h2><a href="/bills?bucket=ongoing">All ongoing →</a></div>
+    <ul class="list">
+    {% for b in moving %}
+      <li><a class="title" href="{{ bill_url(b.biennium, b.bill_id) }}">{{ b.bill_id }}</a> {{ b.short_description }}
+        <div class="meta">{{ stage_badge(b.stage) }} {{ b.stage_label }}</div></li>
+    {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  {% if proposed %}
+  <section class="card">
+    <div class="panel-head"><h2>Newly proposed</h2><a href="/bills?bucket=proposed&sort=introduced">All proposed →</a></div>
+    <ul class="list">
+    {% for b in proposed %}
+      <li><a class="title" href="{{ bill_url(b.biennium, b.bill_id) }}">{{ b.bill_id }}</a> {{ b.short_description }}
+        <div class="meta">{% if b.prime_name %}{{ member_tag(b.prime_name, b.prime_sponsor_id, b.prime_party, b.prime_district) }} · {% endif %}{{ b.introduced_date | date }}</div></li>
+    {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  <section class="card">
+    <div class="panel-head"><h2>Recently enacted</h2><a href="/bills?stage=enacted">All laws →</a></div>
+    <ul class="list">
+    {% for b in recent_laws %}
+      <li><a class="title" href="{{ bill_url(b.biennium, b.bill_id) }}">{{ b.bill_id }}</a> {{ b.short_description }}
+        <div class="meta">{{ b.stage_label | replace("Enacted · ", "") }}{% if b.prime_name %} · {{ member_tag(b.prime_name, b.prime_sponsor_id, b.prime_party, b.prime_district) }}{% endif %}</div></li>
+    {% endfor %}
+    </ul>
+  </section>
+  <section class="card">
+    <div class="panel-head"><h2>Latest final votes</h2><a href="/votes">All votes →</a></div>
+    <ul class="list">
+    {% for rc in recent_votes %}
+      <li><a class="title" href="/votes/{{ rc.id }}">{{ rc.bill_id }}</a> {{ rc.short_description }}
+        <div class="meta">{{ rc.agency }} · {{ rc.vote_date | date }} · {{ rc.yeas }}–{{ rc.nays }} {{ result_badge(rc.result) }}</div>
+        {{ vote_bar(rc) }}</li>
+    {% endfor %}
+    </ul>
+  </section>
+</div>
+
+<section class="card" style="margin-top:1.25rem">
+  <div class="panel-head"><h2>Supreme Court: laws &amp; public policy</h2><a href="/court">All {{ "{:,}".format(counts.cases) }} decisions →</a></div>
+  {% if cases %}
+  <ul class="list">
+  {% for cc in cases %}
+    <li><a class="title" href="/court/{{ cc.id }}">{{ cc.case_name }}</a>
+      <div class="meta">{{ cc.date_filed | date }}{% if cc.docket_number %} · No. {{ cc.docket_number }}{% endif %} · {{ category_badges(cc.categories) }}</div></li>
+  {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Court decisions are still loading. Check back shortly.</p>
+  {% endif %}
+</section>
+
+<p class="muted small" style="margin-top:1.5rem">
+  {{ "{:,}".format(counts.all_bills) }} bills · {{ "{:,}".format(counts.members) }} legislators · {{ "{:,}".format(counts.roll_calls) }} recorded votes · {{ "{:,}".format(counts.cases) }} court decisions.
+</p>
+{% endblock %}

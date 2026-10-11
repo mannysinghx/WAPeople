@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "_macros.html" import party %}
+{% block title %}Legislators {{ f.biennium | biennium }}{% endblock %}
+{% block content %}
+<h1>Legislators</h1>
+<p class="muted">Members of the Washington State House and Senate in the {{ f.biennium | biennium }} session. Click anyone to see the bills they sponsored and every recorded vote.</p>
+
+<form class="filters" method="get" action="/legislators">
+  <div class="wide">
+    <label for="l-q">Name</label>
+    <input id="l-q" type="search" name="q" value="{{ f.q }}" placeholder="e.g. Fitzgibbon">
+  </div>
+  <div>
+    <label for="l-b">Session</label>
+    <select id="l-b" name="biennium">
+      {% for b in bienniums %}<option value="{{ b.id }}"{% if f.biennium == b.id %} selected{% endif %}>{{ b.id | biennium }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label for="l-c">Chamber</label>
+    <select id="l-c" name="chamber">
+      <option value="">Both</option>
+      <option value="House"{% if f.chamber == "House" %} selected{% endif %}>House</option>
+      <option value="Senate"{% if f.chamber == "Senate" %} selected{% endif %}>Senate</option>
+    </select>
+  </div>
+  <div>
+    <label for="l-p">Party</label>
+    <select id="l-p" name="party">
+      <option value="">Any</option>
+      <option value="D"{% if f.party == "D" %} selected{% endif %}>Democrat</option>
+      <option value="R"{% if f.party == "R" %} selected{% endif %}>Republican</option>
+    </select>
+  </div>
+  <div>
+    <label for="l-d">District</label>
+    <input id="l-d" type="number" min="1" max="49" name="district" value="{{ f.district }}" placeholder="1–49">
+  </div>
+  <div class="actions"><button class="btn" type="submit">Apply</button></div>
+</form>
+
+{% set senate = members | selectattr("agency", "equalto", "Senate") | list %}
+{% set house = members | selectattr("agency", "equalto", "House") | list %}
+<p class="result-meta">{{ members | length }} members · Senate {{ senate | length }} ({{ senate | selectattr("party", "equalto", "D") | list | length }} D, {{ senate | selectattr("party", "equalto", "R") | list | length }} R) · House {{ house | length }} ({{ house | selectattr("party", "equalto", "D") | list | length }} D, {{ house | selectattr("party", "equalto", "R") | list | length }} R)</p>
+
+{% if members %}
+<div class="table-wrap">
+<table class="rtable">
+  <thead><tr><th scope="col">Name</th><th scope="col">Chamber</th><th scope="col">Party</th><th scope="col">District</th><th scope="col">Bills as prime sponsor</th><th scope="col">Became law</th></tr></thead>
+  <tbody>
+  {% for m in members %}
+    <tr>
+      <td><a href="/legislators/{{ m.id }}"><strong>{{ m.name }}</strong></a></td>
+      <td data-label="Chamber">{{ m.agency }}</td>
+      <td data-label="Party">{{ party(m.party, True) }}</td>
+      <td data-label="District">{{ m.district }}</td>
+      <td data-label="Prime-sponsored bills"><a href="/bills?sponsor={{ m.id }}&biennium={{ f.biennium }}">{{ m.prime_bills }}</a></td>
+      <td data-label="Became law">{{ m.prime_laws }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="card empty"><h2>No members match</h2><p>Try another session or clear the filters.</p></div>
+{% endif %}
+<p class="muted small" style="margin-top:1rem">Counts include bills only (not resolutions or memorials) where the member is listed as prime sponsor in this session. Members who served only part of a term are included.</p>
+{% endblock %}

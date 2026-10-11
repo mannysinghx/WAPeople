@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bill_table, pager %}
+{% block title %}{% if f.bucket %}{{ BUCKETS[f.bucket] }} bills{% else %}Bills{% endif %}{% endblock %}
+{% block content %}
+<div class="spread">
+  <h1>{% if sponsor_row %}Bills sponsored by {{ sponsor_row.name }}{% elif f.bucket %}{{ BUCKETS[f.bucket] }} bills{% else %}All bills{% endif %}</h1>
+</div>
+
+<nav class="tabs" aria-label="Bill status">
+  {% for key, label, hint in [("proposed", "Proposed", "in committee"), ("ongoing", "Ongoing", "moving"), ("past", "Past", "finished"), ("", "All", "")] %}
+  <a href="{{ qs(request, bucket=key or None, page=None, stage=None) }}"{% if f.bucket == key %} aria-current="page"{% endif %}>{{ label }}{% if hint %} <span class="count">· {{ hint }}</span>{% endif %}</a>
+  {% endfor %}
+</nav>
+
+<form class="filters" method="get" action="/bills">
+  <input type="hidden" name="bucket" value="{{ f.bucket }}">
+  {% if f.sponsor %}<input type="hidden" name="sponsor" value="{{ f.sponsor }}">{% endif %}
+  <div class="wide">
+    <label for="f-q">Search</label>
+    <input id="f-q" type="search" name="q" value="{{ f.q }}" placeholder="Bill number or topic, e.g. 5096, housing">
+  </div>
+  <div>
+    <label for="f-b">Session</label>
+    <select id="f-b" name="biennium">
+      <option value="">All sessions</option>
+      {% for b in bienniums %}<option value="{{ b.id }}"{% if f.biennium == b.id %} selected{% endif %}>{{ b.id | biennium }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label for="f-s">Stage</label>
+    <select id="f-s" name="stage">
+      <option value="">Any stage</option>
+      {% for k, label in STAGE_FILTERS.items() %}<option value="{{ k }}"{% if f.stage == k %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label for="f-c">Chamber</label>
+    <select id="f-c" name="chamber">
+      <option value="">Both</option>
+      <option value="House"{% if f.chamber == "House" %} selected{% endif %}>House bills</option>
+      <option value="Senate"{% if f.chamber == "Senate" %} selected{% endif %}>Senate bills</option>
+    </select>
+  </div>
+  <div>
+    <label for="f-t">Type</label>
+    <select id="f-t" name="type">
+      {% for k, label in TYPE_FILTERS.items() %}<option value="{{ k }}"{% if f.type == k %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label for="f-o">Sort</label>
+    <select id="f-o" name="sort">
+      {% if f.q %}<option value="relevance"{% if f.sort == "relevance" %} selected{% endif %}>Best match</option>{% endif %}
+      <option value="recent"{% if f.sort == "recent" %} selected{% endif %}>Latest action</option>
+      <option value="introduced"{% if f.sort == "introduced" %} selected{% endif %}>Newest introduced</option>
+      <option value="number"{% if f.sort == "number" %} selected{% endif %}>Bill number</option>
+    </select>
+  </div>
+  <div class="actions"><button class="btn" type="submit">Apply</button>
+    <a class="btn secondary" href="/bills{% if f.bucket %}?bucket={{ f.bucket }}{% endif %}">Reset</a></div>
+</form>
+
+<p class="result-meta">{{ "{:,}".format(result.total) }} result{{ "" if result.total == 1 else "s" }}{% if result.pages > 1 %} · page {{ result.page }} of {{ "{:,}".format(result.pages) }}{% endif %}</p>
+
+{% if result.items %}
+  {{ bill_table(result.items) }}
+  {{ pager(result, request) }}
+{% else %}
+  <div class="card empty">
+    {% if f.bucket in ("ongoing", "proposed") and cur and cur.status in ("adjourned_final", "closed") and not f.q %}
+      <h2>No {{ BUCKETS[f.bucket] | lower }} bills right now</h2>
+      <p>The {{ cur.id | biennium }} Legislature has adjourned, so nothing is moving. The next regular session begins {{ next_session | date(True) }}; prefiled bills will show up here as soon as they are filed (usually from early December).</p>
+      <p><a class="btn" href="/bills?biennium={{ cur.id }}&bucket=past">See what happened in {{ cur.id | biennium }}</a></p>
+    {% else %}
+      <h2>No bills match</h2>
+      <p>Try removing a filter or searching all sessions.</p>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

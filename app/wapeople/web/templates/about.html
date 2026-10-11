@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}About the data{% endblock %}
+{% block content %}
+<div class="prose">
+<h1>About WA People</h1>
+<p>WA People puts Washington State legislation in one place: every bill since the 1991–92 session, who proposed it, what happened to it, how each legislator voted, and the Washington Supreme Court decisions about laws and public policy. It is built entirely with open-source software and public data, and it updates itself every day.</p>
+
+<h2 id="sources">Where the data comes from</h2>
+<ul>
+  <li><strong>Bills, sponsors, history and votes:</strong> the Washington State Legislature's public <a href="https://wslwebservices.leg.wa.gov/">web services</a>, the same data behind <a href="https://app.leg.wa.gov/">app.leg.wa.gov</a>.</li>
+  <li><strong>Supreme Court decisions:</strong> <a href="https://www.courtlistener.com/">CourtListener</a>, the free legal archive run by the nonprofit Free Law Project. Full opinion text comes from the official PDFs published by the <a href="https://www.courts.wa.gov/opinions/">Washington Courts</a>.</li>
+</ul>
+<p>This is not an official government website. For anything that matters legally, check the official bill page or the opinion itself. Every page here links to its official source.</p>
+
+<h2 id="stages">How bills are sorted</h2>
+<p>The Legislature reports a short status code for each bill, such as <code>H Approps</code>, <code>S Rules X</code> or <code>C 209 L 25</code>. WA People turns it into plain language and puts every bill into one of three groups:</p>
+<ul>
+  <li><strong>Proposed:</strong> prefiled, introduced, or sitting in a policy or fiscal committee.</li>
+  <li><strong>Ongoing:</strong> out of committee, on a floor calendar, passed one chamber, or passed by the Legislature and waiting for the Governor.</li>
+  <li><strong>Past:</strong> enacted (with its chapter in the session laws), vetoed, adopted, confirmed, or did not pass.</li>
+</ul>
+<p>Whether a bill “passed the House” or “passed the Senate” comes from its recorded final-passage roll call. Washington's constitution (Article II, section 22) requires a recorded yea/nay vote on final passage. A bill that hasn't passed when the second year of a two-year session ends is listed as <em>did not pass</em>, together with how far it got (for example, “passed House, stalled in Senate”). Bill numbers restart every two years, so <strong>HB 1217</strong> in 2025–26 and <strong>HB 1217</strong> in 2023–24 are different bills.</p>
+
+<h2 id="court">How Supreme Court cases are selected</h2>
+<p>A decision of the Washington Supreme Court (from {{ "1991" }} on) is included when its text matches at least one of these searches. The matching passage is shown on every case so you can judge for yourself:</p>
+<ul>
+  {% for key, spec in CATEGORIES.items() %}
+  <li><strong>{{ spec.label }}:</strong> {{ spec.description }} <br><span class="small muted">Search: <code>{{ spec.query }}</code></span></li>
+  {% endfor %}
+</ul>
+<p>Attorney and judicial discipline cases are left out. When an opinion cites a session law (“Laws of 2021, ch. 196”), it is linked to the exact bill that became that chapter. When it names a bill with a year next to it (“ESSB 5096 … 2021”), it is linked by number and session. References without a year are listed but not linked, because the same bill number is reused every session.</p>
+
+<h2 id="freshness">Freshness</h2>
+<p>The current session and new court decisions are refreshed every morning. Past sessions don't change.</p>
+<div class="table-wrap" style="margin-top:.5rem">
+<table class="rtable">
+  <thead><tr><th scope="col">Session</th><th scope="col">State</th><th scope="col">Last legislative activity</th><th scope="col">Last refreshed</th></tr></thead>
+  <tbody>
+  {% for b in bienniums[:6] %}
+  <tr><td>{{ b.id | biennium }}</td><td data-label="State">{{ {"in_session": "In session", "interim": "Between sessions", "adjourned_final": "Adjourned for good", "closed": "Closed", "upcoming": "Prefiling"}.get(b.status, b.status) }}</td>
+      <td data-label="Last activity">{{ b.last_activity_date | date }}</td><td data-label="Refreshed">{{ b.bills_synced_at | date }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="small muted" style="margin-top:.5rem">{{ "{:,}".format(counts.all_bills) }} bills · {{ "{:,}".format(counts.members) }} legislators · {{ "{:,}".format(counts.roll_calls) }} roll calls · {{ "{:,}".format(counts.cases) }} court decisions across {{ bienniums | length }} sessions.</p>
+
+<h2 id="tech">Open-source stack</h2>
+<p>PostgreSQL (data and full-text search), Python with FastAPI and Jinja2 (website), httpx and pypdf (data collection), all running in Docker. No tracking, no cookies, no ads.</p>
+</div>
+{% endblock %}

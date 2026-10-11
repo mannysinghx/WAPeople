@@ -1,0 +1,109 @@
+{% macro stage_badge(stage, label=None) -%}
+<span class="badge tone-{{ STAGE_TONE.get(stage, 'muted') }}">{{ label or STAGES.get(stage, (stage,))[0] }}</span>
+{%- endmacro %}
+
+{% macro party(p, long=False) -%}
+{%- if p -%}<span class="party party-{{ p }}" title="{{ PARTY_NAMES.get(p, p) }}">{{ PARTY_NAMES.get(p, p) if long else p }}</span>{%- endif -%}
+{%- endmacro %}
+
+{% macro member_tag(name, member_id, p=None, district=None) -%}
+<a href="/legislators/{{ member_id }}">{{ name }}</a>{% if p or district %} <span class="muted small">({{ party(p) }}{% if p and district %}-{% endif %}{{ district or "" }})</span>{% endif %}
+{%- endmacro %}
+
+{% macro result_badge(result) -%}
+{%- if result in ("passed", "adopted", "confirmed", "concurred", "override") -%}
+<span class="badge tone-law">{{ result | capitalize }}</span>
+{%- elif result == "failed" -%}
+<span class="badge tone-bad">Failed</span>
+{%- elif result -%}
+<span class="badge tone-muted">{{ result | capitalize }}</span>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro vote_bar(rc) -%}
+{%- set total = (rc.yeas + rc.nays + rc.absent + rc.excused) or 1 -%}
+<div class="vote-bar" role="img" aria-label="{{ rc.yeas }} yea, {{ rc.nays }} nay, {{ rc.absent + rc.excused }} absent or excused">
+  <span class="y" style="width: {{ (100 * rc.yeas / total) | round(2) }}%"></span>
+  <span class="n" style="width: {{ (100 * rc.nays / total) | round(2) }}%"></span>
+  <span class="o" style="width: {{ (100 * (rc.absent + rc.excused) / total) | round(2) }}%"></span>
+</div>
+{%- endmacro %}
+
+{% macro tally(rc) -%}
+<div class="tally">
+  <span class="y"><b>{{ rc.yeas }}</b> Yea</span>
+  <span class="n"><b>{{ rc.nays }}</b> Nay</span>
+  <span><b>{{ rc.absent }}</b> Absent</span>
+  <span><b>{{ rc.excused }}</b> Excused</span>
+</div>
+{%- endmacro %}
+
+{% macro breakdown(pb) -%}
+{%- if pb -%}
+<table class="breakdown">
+  <thead><tr><th scope="col">Party</th><th scope="col">Yea</th><th scope="col">Nay</th><th scope="col">Absent</th><th scope="col">Excused</th></tr></thead>
+  <tbody>
+  {% for p, counts in pb.items() %}
+    <tr><th scope="row">{{ party(p, True) }}</th><td>{{ counts.get("Yea", 0) }}</td><td>{{ counts.get("Nay", 0) }}</td><td>{{ counts.get("Absent", 0) }}</td><td>{{ counts.get("Excused", 0) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro voters(votes) -%}
+<div class="voter-cols">
+{% for choice in ["Yea", "Nay", "Absent", "Excused"] %}
+  {% set group = votes | selectattr("vote", "equalto", choice) | list %}
+  {% if group %}
+  <div>
+    <h4>{{ choice }} ({{ group | length }})</h4>
+    <ul>
+    {% for v in group %}<li><a href="/legislators/{{ v.member_id }}">{{ v.name }}</a> <span class="small">{{ party(v.party) }}{% if v.district %}<span class="muted">-{{ v.district }}</span>{% endif %}</span></li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+{% endfor %}
+</div>
+{%- endmacro %}
+
+{% macro category_badges(cats) -%}
+{% for cat in cats %}<span class="badge tone-proposed" title="{{ CATEGORIES[cat].description if cat in CATEGORIES else '' }}">{{ CATEGORIES[cat].label if cat in CATEGORIES else cat }}</span> {% endfor %}
+{%- endmacro %}
+
+{% macro pager(p, request) -%}
+{% if p.pages > 1 %}
+<nav class="pager" aria-label="Pagination">
+  {% if p.page > 1 %}<a href="{{ qs(request, page=p.page - 1) }}" rel="prev">← Previous</a>{% endif %}
+  {% set lo = [1, p.page - 2] | max %}{% set hi = [p.pages, p.page + 2] | min %}
+  {% if lo > 1 %}<a href="{{ qs(request, page=1) }}">1</a>{% if lo > 2 %}<span class="gap">…</span>{% endif %}{% endif %}
+  {% for n in range(lo, hi + 1) %}
+    {% if n == p.page %}<span class="current" aria-current="page">{{ n }}</span>{% else %}<a href="{{ qs(request, page=n) }}">{{ n }}</a>{% endif %}
+  {% endfor %}
+  {% if hi < p.pages %}{% if hi < p.pages - 1 %}<span class="gap">…</span>{% endif %}<a href="{{ qs(request, page=p.pages) }}">{{ p.pages }}</a>{% endif %}
+  {% if p.page < p.pages %}<a href="{{ qs(request, page=p.page + 1) }}" rel="next">Next →</a>{% endif %}
+</nav>
+{% endif %}
+{%- endmacro %}
+
+{% macro bill_table(items, show_session=True) -%}
+<div class="table-wrap">
+<table class="rtable">
+  <thead><tr>
+    <th scope="col">Bill</th><th scope="col">What it does</th><th scope="col">Prime sponsor</th>
+    <th scope="col">Status</th><th scope="col">Last action</th>
+  </tr></thead>
+  <tbody>
+  {% for b in items %}
+  <tr>
+    <td class="bill-id"><a href="{{ bill_url(b.biennium, b.bill_id) }}">{{ b.bill_id }}</a>{% if show_session %}<div class="muted small">{{ b.biennium | biennium }}</div>{% endif %}</td>
+    <td class="desc">{{ b.short_description or "—" }}{% if b.long_description and b.long_description != b.short_description %}<span class="sub">{{ b.long_description | truncate(160) }}</span>{% endif %}</td>
+    <td data-label="Sponsor">{% if b.prime_name %}{{ member_tag(b.prime_name, b.prime_sponsor_id, b.prime_party, b.prime_district) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td data-label="Status">{{ stage_badge(b.stage) }}<div class="small muted">{{ b.stage_label }}</div></td>
+    <td data-label="Last action" class="nowrap">{{ b.last_action_date | date }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{%- endmacro %}

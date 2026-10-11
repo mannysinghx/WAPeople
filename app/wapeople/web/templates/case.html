@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% from "_macros.html" import category_badges, stage_badge %}
+{% block title %}{{ cc.case_name }} ({{ cc.date_filed.year if cc.date_filed else "" }}){% endblock %}
+{% block content %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/court">Supreme Court</a> › {{ cc.case_name }}</nav>
+<section class="card">
+  <div class="muted small" style="font-weight:800">WASHINGTON SUPREME COURT · {{ (cc.date_filed | date(True)) | upper }}</div>
+  <h1 style="margin:.25rem 0 .5rem">{{ cc.case_name }}</h1>
+  {% if cc.case_name_full and cc.case_name_full != cc.case_name %}<p class="muted">{{ cc.case_name_full }}</p>{% endif %}
+  {{ category_badges(cc.categories) }}
+  <dl class="facts">
+    {% if cc.docket_number %}<div><dt>Docket</dt><dd>No. {{ cc.docket_number }}</dd></div>{% endif %}
+    <div><dt>Decided</dt><dd>{{ cc.date_filed | date(True) }}</dd></div>
+    {% if cc.citations %}<div><dt>Citation</dt><dd>{{ cc.citations | join("; ") }}</dd></div>{% endif %}
+    <div><dt>Cited by later opinions</dt><dd>{{ cc.cite_count }}</dd></div>
+    {% if cc.judges %}<div><dt>Judges</dt><dd>{{ cc.judges }}</dd></div>{% endif %}
+    {% if cc.status %}<div><dt>Status</dt><dd>{{ cc.status }}</dd></div>{% endif %}
+  </dl>
+  <div class="row" style="margin-top:1rem">
+    {% if cc.pdf_url %}<a class="btn" href="{{ cc.pdf_url }}" rel="noopener">Read the opinion (PDF) ↗</a>{% endif %}
+    {% if cc.courtlistener_url %}<a class="btn secondary" href="{{ cc.courtlistener_url }}" rel="noopener">Opinion on CourtListener ↗</a>{% endif %}
+  </div>
+</section>
+
+<section style="margin-top:1.5rem">
+  <h2>Why this case is listed</h2>
+  <div class="card">
+    {% for cat in cc.categories %}
+      <h3>{{ CATEGORIES[cat].label if cat in CATEGORIES else cat }}</h3>
+      <p class="muted small" style="margin:0">{{ CATEGORIES[cat].description if cat in CATEGORIES else "" }}</p>
+      {% if cc.snippets.get(cat) %}<p class="snippet">…{{ cc.snippets[cat] | safe }}…</p>{% endif %}
+      {% if not loop.last %}<hr style="border:0;border-top:1px solid var(--border);margin:1rem 0">{% endif %}
+    {% endfor %}
+  </div>
+</section>
+
+<section style="margin-top:1.5rem">
+  <h2>Legislation discussed</h2>
+  {% if cc.bills %}
+  <div class="card"><ul class="list">
+    {% for b in cc.bills %}
+    <li><a class="title" href="{{ bill_url(b.biennium, b.bill_id) }}">{{ b.bill_id }} ({{ b.biennium | biennium }})</a> {{ b.short_description }}
+      <div class="meta">Cited as “{{ b.mention }}”{% if b.link_type == "bill_number" %} — matched by bill number and the year stated next to it{% else %} — matched by session-law chapter{% endif %} · {{ b.stage_label }}</div></li>
+    {% endfor %}
+  </ul></div>
+  {% endif %}
+  {% if unresolved %}
+  <div class="card" style="margin-top:1rem">
+    <h3>Other references found in the text</h3>
+    <p class="muted small">These could not be tied to one specific bill (bill numbers repeat each session, and initiatives to the people are not bills).</p>
+    <div class="chips">
+    {% for m in unresolved %}
+      {% if m.kind == "bill" %}
+        <a class="chip" href="/bills?q={{ m.number }}&type=all{% if m.biennium %}&biennium={{ m.biennium }}{% endif %}">{{ m.text }}{% if m.year %} ({{ m.year }}){% endif %}</a>
+      {% else %}
+        <span class="chip">{{ m.text }}</span>
+      {% endif %}
+    {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% if not cc.bills and not unresolved %}
+  <p class="muted">{% if cc.text_len %}No specific bills or session laws were found in the opinion text.{% else %}Full opinion text isn't available to scan yet; see the excerpt above and the official opinion.{% endif %}</p>
+  {% endif %}
+  {% if cc.full_text_source %}<p class="muted small">Scanned text source: {{ "official opinion PDF" if cc.full_text_source == "official_pdf" else "CourtListener" }}.</p>{% endif %}
+</section>
+{% endblock %}

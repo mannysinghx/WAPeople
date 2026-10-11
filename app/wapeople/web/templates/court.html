@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% from "_macros.html" import category_badges, pager %}
+{% block title %}Supreme Court decisions on laws & public policy{% endblock %}
+{% block content %}
+<h1>Washington Supreme Court: laws &amp; public policy</h1>
+<p class="muted" style="max-width:52rem">Decisions that cite specific bills, rule on ballot initiatives, decide whether a law is constitutional, or define the Legislature's powers. Each entry shows the passage that put it on this list. <a href="/about#court">How cases are selected</a>.</p>
+
+<nav class="tabs" aria-label="Category">
+  <a href="{{ qs(request, category=None, page=None) }}"{% if not f.category %} aria-current="page"{% endif %}>All</a>
+  {% for key, spec in CATEGORIES.items() %}
+  <a href="{{ qs(request, category=key, page=None) }}"{% if f.category == key %} aria-current="page"{% endif %}>{{ spec.label }} <span class="count">{{ "{:,}".format(cat_counts.get(key, 0)) }}</span></a>
+  {% endfor %}
+</nav>
+
+<form class="filters" method="get" action="/court">
+  <input type="hidden" name="category" value="{{ f.category }}">
+  <div class="wide">
+    <label for="c-q">Search</label>
+    <input id="c-q" type="search" name="q" value="{{ f.q }}" placeholder="Case name or topic, e.g. McCleary, capital gains, Initiative 976">
+  </div>
+  <div>
+    <label for="c-yf">From year</label>
+    <input id="c-yf" type="number" name="year_from" min="1991" max="2100" value="{{ f.year_from }}" placeholder="1991">
+  </div>
+  <div>
+    <label for="c-yt">To year</label>
+    <input id="c-yt" type="number" name="year_to" min="1991" max="2100" value="{{ f.year_to }}" placeholder="{{ current_biennium[:4] | int + 1 }}">
+  </div>
+  <div>
+    <label for="c-s">Sort</label>
+    <select id="c-s" name="sort">
+      {% if f.q %}<option value="relevance"{% if f.sort == "relevance" %} selected{% endif %}>Best match</option>{% endif %}
+      <option value="newest"{% if f.sort == "newest" %} selected{% endif %}>Newest</option>
+      <option value="oldest"{% if f.sort == "oldest" %} selected{% endif %}>Oldest</option>
+      <option value="cited"{% if f.sort == "cited" %} selected{% endif %}>Most cited</option>
+    </select>
+  </div>
+  <div><label class="check"><input type="checkbox" name="linked" value="1"{% if f.linked == "1" %} checked{% endif %}> Linked to a bill on this site</label></div>
+  <div class="actions"><button class="btn" type="submit">Apply</button></div>
+</form>
+
+<p class="result-meta">{{ "{:,}".format(result.total) }} decision{{ "" if result.total == 1 else "s" }}</p>
+{% if result.items %}
+<div class="stack">
+{% for cc in result.items %}
+  <article class="card">
+    <div class="spread">
+      <h2 style="font-size:1.12rem;margin:0"><a href="/court/{{ cc.id }}">{{ cc.case_name }}</a></h2>
+      <span class="muted small nowrap">{{ cc.date_filed | date }}</span>
+    </div>
+    <div class="muted small" style="margin:.2rem 0 .4rem">
+      {% if cc.docket_number %}No. {{ cc.docket_number }}{% endif %}{% if cc.citations %} · {{ cc.citations | join("; ") }}{% endif %}
+      {% if cc.cite_count %} · cited {{ cc.cite_count }} time{{ "" if cc.cite_count == 1 else "s" }}{% endif %}
+      {% if cc.n_bills %} · <strong>{{ cc.n_bills }} linked bill{{ "" if cc.n_bills == 1 else "s" }}</strong>{% endif %}
+    </div>
+    {{ category_badges(cc.categories) }}
+    {% set snip = cc.snippets.get(f.category) if f.category else (cc.snippets.values() | list | first) %}
+    {% if snip %}<p class="snippet">…{{ snip | safe }}…</p>{% endif %}
+  </article>
+{% endfor %}
+</div>
+{{ pager(result, request) }}
+{% else %}
+<div class="card empty"><h2>No decisions match</h2><p>{% if cat_counts %}Try a broader search or another category.{% else %}Court decisions are still loading — check back shortly.{% endif %}</p></div>
+{% endif %}
+{% endblock %}

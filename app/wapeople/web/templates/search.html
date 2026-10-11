@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bill_table, category_badges, party %}
+{% block title %}Search: {{ q }}{% endblock %}
+{% block content %}
+<h1>Results for “{{ q }}”</h1>
+<form class="big-search" action="/search" role="search" style="margin-bottom:1.5rem">
+  <label class="sr-only" for="sq">Search</label>
+  <input id="sq" type="search" name="q" value="{{ q }}">
+  <button class="btn" type="submit">Search</button>
+</form>
+
+{% if members %}
+<section style="margin-bottom:1.5rem">
+  <h2>Legislators</h2>
+  <div class="chips">
+    {% for m in members %}<a class="chip" href="/legislators/{{ m.id }}"><strong>{{ m.name }}</strong> <span class="small">{{ party(m.party) }}{% if m.agency %} · {{ m.agency }}{% endif %}{% if m.district %} · LD {{ m.district }}{% endif %}{% if m.latest_biennium %} · {{ m.latest_biennium | biennium }}{% endif %}</span></a>{% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section style="margin-bottom:1.5rem">
+  <div class="panel-head"><h2>Bills <span class="muted small">{{ "{:,}".format(bills.total) }}</span></h2>
+    {% if bills.total > bills.items | length %}<a href="/bills?q={{ q | urlencode }}&type=all">See all {{ "{:,}".format(bills.total) }} →</a>{% endif %}</div>
+  {% if bills.items %}{{ bill_table(bills.items) }}{% else %}<p class="muted">No bills match.</p>{% endif %}
+</section>
+
+<section>
+  <div class="panel-head"><h2>Supreme Court decisions <span class="muted small">{{ "{:,}".format(cases.total) }}</span></h2>
+    {% if cases.total > cases.items | length %}<a href="/court?q={{ q | urlencode }}">See all →</a>{% endif %}</div>
+  {% if cases.items %}
+  <div class="card"><ul class="list">
+    {% for cc in cases.items %}
+    <li><a class="title" href="/court/{{ cc.id }}">{{ cc.case_name }}</a>
+      <div class="meta">{{ cc.date_filed | date }} · {{ category_badges(cc.categories) }}</div></li>
+    {% endfor %}
+  </ul></div>
+  {% else %}<p class="muted">No court decisions match.</p>{% endif %}
+</section>
+{% endblock %}

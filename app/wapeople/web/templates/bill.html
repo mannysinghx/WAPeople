@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% from "_macros.html" import stage_badge, member_tag, party, result_badge, vote_bar, tally, breakdown, voters, category_badges %}
+{% block title %}{{ bill.bill_id }} ({{ bill.biennium | biennium }}) — {{ bill.short_description or bill.type_name }}{% endblock %}
+{% block description %}{{ bill.bill_id }} ({{ bill.biennium | biennium }}): {{ bill.long_description or bill.short_description }}. Status: {{ bill.stage_label }}.{% endblock %}
+{% macro roll_card(rc) %}
+<article class="card vote-card" id="vote-{{ rc.id }}">
+  <div class="spread">
+    <h3 style="margin:0">{{ rc.agency }} · {{ rc.motion | motion }}</h3>
+    <div class="row">{{ result_badge(rc.result) }} <span class="muted small">{{ rc.vote_date | date(True) }}</span></div>
+  </div>
+  {% if rc.version_id %}<div class="muted small">Version voted on: {{ rc.version_id }}</div>{% endif %}
+  {{ vote_bar(rc) }}
+  {{ tally(rc) }}
+  {{ breakdown(rc.party_breakdown) }}
+  {% if rc.votes %}
+  <details class="voters">
+    <summary>How each member voted</summary>
+    {{ voters(rc.votes) }}
+  </details>
+  {% endif %}
+  <div class="small" style="margin-top:.4rem"><a href="/votes/{{ rc.id }}">Permalink to this vote</a></div>
+</article>
+{% endmacro %}
+{% block content %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/bills">Bills</a> › <a href="/bills?biennium={{ bill.biennium }}">{{ bill.biennium | biennium }}</a> › {{ bill.bill_id }}</nav>
+
+<section class="card bill-head">
+  <div class="id">{{ bill.type_name | upper }} · {{ bill.biennium | biennium }} SESSION{% if bill.current_version and bill.current_version != bill.bill_id %} · LATEST VERSION {{ bill.current_version }}{% endif %}</div>
+  <h1 style="margin-top:.25rem">{{ bill.bill_id }}: {{ bill.short_description or "—" }}</h1>
+  {% if bill.long_description %}<p class="lead" style="font-size:1.08rem">{{ bill.long_description }}</p>{% endif %}
+  <div class="row">{{ stage_badge(bill.stage) }} <span>{{ bill.stage_label }}</span></div>
+
+  {% if steps %}
+  <ol class="progress" aria-label="Progress">
+    {% for s in steps %}
+    <li class="{% if s.done %}done{% endif %}{% if s.stop %} stop{% endif %}">{{ s.label }}{% if s.when and s.done %}<span class="when">{{ s.when | date }}</span>{% elif s.stop %}<span class="when">stopped here</span>{% endif %}</li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+
+  <dl class="facts">
+    <div><dt>Prime sponsor</dt><dd>{% if bill.prime_name %}{{ member_tag(bill.prime_name, bill.prime_sponsor_id, bill.prime_party, bill.prime_district) }}{% elif bill.sponsor_text %}{{ bill.sponsor_text }}{% else %}—{% endif %}</dd></div>
+    <div><dt>Introduced</dt><dd>{{ (bill.introduced_date | date(True)) or "Not yet introduced" }}{% if bill.original_agency %} in the {{ bill.original_agency }}{% endif %}</dd></div>
+    <div><dt>Last action</dt><dd>{{ bill.last_action_date | date(True) }}</dd></div>
+    {% if bill.session_law_chapter %}<div><dt>Session law</dt><dd>{{ session_law_text(bill.session_law_year, bill.session_law_chapter, bill.session_law_special) }}</dd></div>{% endif %}
+    {% if bill.requested_by %}<div><dt>Requested by</dt><dd>{{ bill.requested_by | join(", ") }}</dd></div>{% endif %}
+    {% if bill.companions %}<div><dt>Companion bill</dt><dd>{% for cpn in bill.companions %}<a href="{{ bill_url(bill.biennium, base_id(cpn) or cpn) }}">{{ cpn }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</dd></div>{% endif %}
+    {% if bill.fiscal_note or bill.appropriations %}<div><dt>Budget</dt><dd>{% if bill.appropriations %}Makes appropriations{% endif %}{% if bill.fiscal_note and bill.appropriations %} · {% endif %}{% if bill.fiscal_note %}Has a fiscal note{% endif %}</dd></div>{% endif %}
+    {% if bill.versions | length > 1 %}<div><dt>Versions</dt><dd class="small">{{ bill.versions | join(", ") }}</dd></div>{% endif %}
+  </dl>
+
+  <nav class="toc" aria-label="On this page">
+    <a href="#sponsors">Sponsors ({{ sponsors | length }})</a>
+    <a href="#votes">Votes ({{ final_rolls | length + other_rolls | length }})</a>
+    <a href="#history">History ({{ actions | length }})</a>
+    {% if cases %}<a href="#court">Court cases ({{ cases | length }})</a>{% endif %}
+    <a href="{{ leg_url(bill) }}" rel="noopener">Official bill page &amp; text ↗</a>
+  </nav>
+  {% if bill.legal_title %}<p class="muted small" style="margin:.9rem 0 0">{{ bill.legal_title }}</p>{% endif %}
+</section>
+
+<section id="sponsors" style="margin-top:1.5rem">
+  <h2>Sponsors</h2>
+  {% if sponsors %}
+  <div class="card">
+    {% set prime = sponsors | selectattr("sponsor_type", "equalto", "Primary") | list %}
+    {% set co = sponsors | rejectattr("sponsor_type", "equalto", "Primary") | list %}
+    {% if prime %}<p><strong>Prime sponsor:</strong> {% for s in prime %}{{ member_tag(s.name, s.member_id, s.party, s.district) }}{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+    {% if co %}
+      {% set dem = co | selectattr("party", "equalto", "D") | list | length %}{% set rep = co | selectattr("party", "equalto", "R") | list | length %}
+      <p style="margin-bottom:.5rem"><strong>{{ co | length }} co-sponsor{{ "" if co | length == 1 else "s" }}</strong> <span class="muted">({{ dem }} Democrat{{ "" if dem == 1 else "s" }}, {{ rep }} Republican{{ "" if rep == 1 else "s" }})</span></p>
+      <div class="chips">{% for s in co %}<a class="chip" href="/legislators/{{ s.member_id }}">{{ s.name }} <span class="small">{{ party(s.party) }}{% if s.district %}<span class="muted">-{{ s.district }}</span>{% endif %}</span></a>{% endfor %}</div>
+    {% endif %}
+  </div>
+  {% elif bill.type_code == "GA" %}
+  <p class="muted">Governor's appointments have no legislative sponsor.</p>
+  {% else %}
+  <p class="muted">{% if bill.sponsor_text %}Sponsor listed by the Legislature: {{ bill.sponsor_text }}.{% else %}No sponsor information.{% endif %}</p>
+  {% endif %}
+</section>
+
+<section id="votes" style="margin-top:1.5rem">
+  <h2>Votes</h2>
+  {% if final_rolls %}
+    {% for rc in final_rolls %}{{ roll_card(rc) }}{% endfor %}
+  {% endif %}
+  {% if other_rolls %}
+    <details style="margin-top:1rem">
+      <summary class="btn secondary small">{{ other_rolls | length }} other recorded vote{{ "" if other_rolls | length == 1 else "s" }} (amendments, procedural motions)</summary>
+      <div style="margin-top:1rem">{% for rc in other_rolls %}{{ roll_card(rc) }}{% endfor %}</div>
+    </details>
+  {% endif %}
+  {% if not final_rolls and not other_rolls %}
+    <p class="muted">No recorded floor votes. {% if bill.stage in ("committee", "introduced", "prefiled") or "committee" in bill.stage_label %}This measure never reached a floor vote.{% endif %}</p>
+  {% endif %}
+</section>
+
+<section id="history" style="margin-top:1.5rem">
+  <h2>History</h2>
+  {% if actions %}
+  <div class="card">
+    <ol class="timeline">
+      {% for a in actions | reverse %}
+      <li><time datetime="{{ a.action_date or '' }}">{{ a.action_date | date }}</time><span>{{ a.description }}{% if a.version_id and a.version_id != bill.bill_id %} <span class="muted small">({{ a.version_id }})</span>{% endif %}</span></li>
+      {% endfor %}
+    </ol>
+  </div>
+  {% else %}<p class="muted">No history recorded yet.</p>{% endif %}
+</section>
+
+{% if cases %}
+<section id="court" style="margin-top:1.5rem">
+  <h2>Washington Supreme Court decisions that cite this {{ bill.type_name | lower }}</h2>
+  <div class="card"><ul class="list">
+    {% for cc in cases %}
+    <li><a class="title" href="/court/{{ cc.id }}">{{ cc.case_name }}</a>
+      <div class="meta">{{ cc.date_filed | date }} · cited as “{{ cc.mention }}”{% if cc.link_type == "bill_number" %} (matched by bill number and year){% endif %} · {{ category_badges(cc.categories) }}</div></li>
+    {% endfor %}
+  </ul></div>
+</section>
+{% endif %}
+
+{% if others %}
+<section style="margin-top:1.5rem">
+  <h2>{{ bill.bill_id }} in other sessions</h2>
+  <p class="muted small">Bill numbers restart every two years, so the same number is a different bill in each session.</p>
+  <div class="card"><ul class="list">
+    {% for o in others %}<li><a class="title" href="{{ bill_url(o.biennium, o.bill_id) }}">{{ o.bill_id }} ({{ o.biennium | biennium }})</a> {{ o.short_description }} <span class="meta">· {{ o.stage_label }}</span></li>{% endfor %}
+  </ul></div>
+</section>
+{% endif %}
+{% endblock %}

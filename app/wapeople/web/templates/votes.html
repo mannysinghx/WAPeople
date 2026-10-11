@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_macros.html" import result_badge, vote_bar, pager %}
+{% block title %}Roll-call votes{% endblock %}
+{% block content %}
+<h1>Roll-call votes</h1>
+<p class="muted">Every recorded floor vote in the House and Senate. Open a vote to see how each member voted.</p>
+
+<form class="filters" method="get" action="/votes">
+  <div class="wide">
+    <label for="v-q">Bill or topic</label>
+    <input id="v-q" type="search" name="q" value="{{ f.q }}" placeholder="e.g. 5167 or transportation">
+  </div>
+  <div>
+    <label for="v-b">Session</label>
+    <select id="v-b" name="biennium">
+      <option value="">All sessions</option>
+      {% for b in bienniums %}<option value="{{ b.id }}"{% if f.biennium == b.id %} selected{% endif %}>{{ b.id | biennium }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label for="v-c">Chamber</label>
+    <select id="v-c" name="chamber">
+      <option value="">Both</option>
+      <option{% if f.chamber == "House" %} selected{% endif %}>House</option>
+      <option{% if f.chamber == "Senate" %} selected{% endif %}>Senate</option>
+    </select>
+  </div>
+  <div>
+    <label for="v-f">Which votes</label>
+    <select id="v-f" name="final">
+      <option value="1"{% if f.final == "1" %} selected{% endif %}>Final passage</option>
+      <option value="0"{% if f.final != "1" %} selected{% endif %}>All (incl. amendments)</option>
+    </select>
+  </div>
+  <div>
+    <label class="check"><input type="checkbox" name="close" value="1"{% if f.close == "1" %} checked{% endif %}> Close votes only (margin ≤ 6)</label>
+  </div>
+  <div class="actions"><button class="btn" type="submit">Apply</button></div>
+</form>
+
+<p class="result-meta">{{ "{:,}".format(result.total) }} vote{{ "" if result.total == 1 else "s" }}</p>
+{% if result.items %}
+<div class="table-wrap">
+<table class="rtable">
+  <thead><tr><th scope="col">Date</th><th scope="col">Bill</th><th scope="col">Chamber · motion</th><th scope="col">Result</th></tr></thead>
+  <tbody>
+  {% for rc in result.items %}
+  <tr>
+    <td class="nowrap">{{ rc.vote_date | date }}</td>
+    <td class="desc"><a class="bill-id" href="{{ bill_url(rc.biennium, rc.bill_id) }}">{{ rc.bill_id }}</a> <span class="muted small">({{ rc.biennium | biennium }})</span><span class="sub">{{ rc.short_description }}</span></td>
+    <td data-label="Motion"><a href="/votes/{{ rc.id }}">{{ rc.agency }} · {{ rc.motion | motion }}</a></td>
+    <td data-label="Result" style="min-width:160px"><strong>{{ rc.yeas }}–{{ rc.nays }}</strong> {{ result_badge(rc.result) }}{{ vote_bar(rc) }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{{ pager(result, request) }}
+{% else %}
+<div class="card empty"><h2>No votes match</h2><p>Try a different session or include all vote types.</p></div>
+{% endif %}
+{% endblock %}

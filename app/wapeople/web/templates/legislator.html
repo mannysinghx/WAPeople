@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% from "_macros.html" import party, bill_table, pager, result_badge, stage_badge %}
+{% block title %}{{ m.name }}{% endblock %}
+{% block description %}{{ m.name }}, Washington State {{ m.agency or "Legislature" }}: sponsored bills and voting record.{% endblock %}
+{% block content %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/legislators">Legislators</a> › {{ m.name }}</nav>
+<section class="card">
+  <div class="member-head">
+    <div class="avatar party-{{ m.party }}" aria-hidden="true">{{ (m.first_name or m.name)[:1] }}{{ (m.last_name or "")[:1] }}</div>
+    <div>
+      <h1 style="margin:0">{{ m.name }}</h1>
+      <div class="muted">
+        {% if m.agency %}{{ "Senator" if m.agency == "Senate" else "Representative" }}{% endif %}
+        {% if m.party %} · {{ party(m.party, True) }}{% endif %}
+        {% if m.district %} · District {{ m.district }}{% endif %}
+        {% if m.latest_biennium %} · most recent term {{ m.latest_biennium | biennium }}{% endif %}
+      </div>
+      {% if m.email or m.phone %}<div class="small" style="margin-top:.25rem">Official contact: {% if m.email %}<a href="mailto:{{ m.email }}">{{ m.email }}</a>{% endif %}{% if m.email and m.phone %} · {% endif %}{{ m.phone or "" }}</div>{% endif %}
+    </div>
+  </div>
+  {% if m.terms %}
+  <div class="chips" style="margin-top:1rem">
+    {% for t in m.terms %}<span class="chip">{{ t.biennium | biennium }} · {{ t.agency }} · {{ party(t.party) }}{% if t.district %} · LD {{ t.district }}{% endif %}</span>{% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+<section class="stats" style="margin-top:1rem" aria-label="Totals">
+  <div class="stat"><div class="n">{{ "{:,}".format(stats.prime) }}</div><div class="l">Bills as prime sponsor</div></div>
+  <div class="stat"><div class="n">{{ "{:,}".format(stats.prime_laws) }}</div><div class="l">of those became law</div></div>
+  <div class="stat"><div class="n">{{ "{:,}".format(stats.cosponsor) }}</div><div class="l">Bills co-sponsored</div></div>
+  <div class="stat"><div class="n">{{ "{:,}".format(stats.votes_total) }}</div><div class="l">Recorded votes</div></div>
+  {% if stats.votes_total %}
+  <div class="stat"><div class="n">{{ (100 * (stats.votes_absent + stats.votes_excused) / stats.votes_total) | round(1) }}%</div><div class="l">Absent or excused</div></div>
+  {% endif %}
+</section>
+
+<nav class="tabs" aria-label="Record">
+  <a href="?tab=votes"{% if tab == "votes" %} aria-current="page"{% endif %}>Voting record</a>
+  <a href="?tab=bills"{% if tab == "bills" %} aria-current="page"{% endif %}>Sponsored bills</a>
+</nav>
+
+<form class="filters" method="get">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <div class="wide">
+    <label for="m-q">Bill or topic</label>
+    <input id="m-q" type="search" name="q" value="{{ f.q }}" placeholder="e.g. 1217 or climate">
+  </div>
+  <div>
+    <label for="m-b">Session</label>
+    <select id="m-b" name="biennium">
+      <option value="">All sessions</option>
+      {% for b in bienniums %}<option value="{{ b }}"{% if f.biennium == b %} selected{% endif %}>{{ b | biennium }}</option>{% endfor %}
+    </select>
+  </div>
+  {% if tab == "votes" %}
+  <div>
+    <label for="m-v">Vote</label>
+    <select id="m-v" name="vote">
+      <option value="">Any</option>
+      {% for v in ["Yea", "Nay", "Absent", "Excused"] %}<option{% if f.vote == v %} selected{% endif %}>{{ v }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label for="m-f">Which votes</label>
+    <select id="m-f" name="final">
+      <option value="1"{% if f.final == "1" %} selected{% endif %}>Final passage only</option>
+      <option value="0"{% if f.final != "1" %} selected{% endif %}>All recorded votes</option>
+    </select>
+  </div>
+  {% endif %}
+  <div class="actions"><button class="btn" type="submit">Apply</button></div>
+</form>
+
+<p class="result-meta">{{ "{:,}".format(listing.total) }} result{{ "" if listing.total == 1 else "s" }}</p>
+{% if tab == "bills" %}
+  {% if listing.items %}{{ bill_table(listing.items) }}{{ pager(listing, request) }}{% else %}<div class="card empty"><p>No sponsored bills match.</p></div>{% endif %}
+  <p class="small" style="margin-top:.75rem"><a href="/bills?sponsor={{ m.id }}">Open in the full bill search →</a> (includes bills co-sponsored)</p>
+{% else %}
+  {% if listing.items %}
+  <div class="table-wrap">
+  <table class="rtable">
+    <thead><tr><th scope="col">Date</th><th scope="col">Bill</th><th scope="col">Motion</th><th scope="col">{{ m.name.split(' ')[-1] }} voted</th><th scope="col">Outcome</th></tr></thead>
+    <tbody>
+    {% for v in listing.items %}
+      <tr>
+        <td class="nowrap">{{ v.vote_date | date }}</td>
+        <td class="desc"><a class="bill-id" href="{{ bill_url(v.biennium, v.bill_id) }}">{{ v.bill_id }}</a> <span class="muted small">({{ v.biennium | biennium }})</span><span class="sub">{{ v.short_description }}</span></td>
+        <td data-label="Motion"><a href="/votes/{{ v.roll_call_id }}">{{ v.motion | motion }}</a><div class="muted small">{{ v.agency }}</div></td>
+        <td data-label="Vote"><span class="badge {{ 'tone-law' if v.vote == 'Yea' else ('tone-bad' if v.vote == 'Nay' else 'tone-muted') }}">{{ v.vote }}</span></td>
+        <td data-label="Outcome">{{ v.yeas }}–{{ v.nays }} {{ result_badge(v.result) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {{ pager(listing, request) }}
+  {% else %}<div class="card empty"><p>No recorded votes match.</p></div>{% endif %}
+{% endif %}
+{% endblock %}
