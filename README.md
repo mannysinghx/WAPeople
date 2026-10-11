@@ -28,6 +28,21 @@ docker compose run --rm sync python -m wapeople.sync refresh                    
 
 Tests: `docker compose run --rm --no-deps sync python -m pytest -q -p no:cacheprovider tests`
 
+## Deploying on Railway
+
+Railway doesn't run `docker-compose.yml`; the stack is three services in one project:
+
+| Service | Source | Settings |
+| --- | --- | --- |
+| `Postgres` | Railway PostgreSQL template | — |
+| `WAPeople` (website) | this repo, branch `main` | Root directory `/app` (uses `app/Dockerfile`; its default command serves the site on `$PORT`), healthcheck `/healthz`, watch paths `/app/**`, variable `DATABASE_URL=${{Postgres.DATABASE_URL}}` |
+| `sync` (daily data refresh) | this repo, branch `main` | Root directory `/app`, start command `python -m wapeople.sync daily`, cron `0 12 * * *` (UTC), restart policy never, watch paths `/app/**`, variables `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `TZ=America/Los_Angeles`, optional `COURTLISTENER_API_TOKEN` |
+
+`sync daily` loads any missing history on an empty database (about 1.5 hours for 1991 onward;
+court decisions fill in over a few days without a CourtListener token), then refreshes and exits.
+To start from an existing database instead, restore a `scripts/backup.sh` dump into the Railway
+Postgres before the first run.
+
 ## Data sources
 
 | Data | Source |

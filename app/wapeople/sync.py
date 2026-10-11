@@ -8,6 +8,7 @@
   python -m wapeople.sync summaries --all    # staff bill summaries (also part of each legislature sync)
   python -m wapeople.sync link               # re-link court cases to bills
   python -m wapeople.sync schedule           # long-running: resume any incomplete load, then refresh daily
+  python -m wapeople.sync daily              # one cycle of the above, then exit (cron jobs, e.g. Railway)
 """
 from __future__ import annotations
 
@@ -166,6 +167,15 @@ def last_ok(job_scope: str) -> datetime | None:
     return row["t"] if row else None
 
 
+def daily() -> None:
+    """One run of what the scheduler does, then exit (for cron hosts such as Railway).
+    Loads any missing history first, so the same command also works on an empty database."""
+    migrate()
+    if incomplete_bienniums():
+        initial()
+    refresh()
+
+
 def schedule() -> None:
     migrate()
     last_attempt = 0.0
@@ -197,6 +207,7 @@ def main() -> None:
     sub.add_parser("initial")
     sub.add_parser("refresh")
     sub.add_parser("schedule")
+    sub.add_parser("daily")
     sub.add_parser("link")
     sub.add_parser("migrate")
     lp = sub.add_parser("legislature")
@@ -220,6 +231,8 @@ def main() -> None:
     elif a.cmd == "refresh":
         migrate()
         refresh()
+    elif a.cmd == "daily":
+        daily()
     elif a.cmd == "schedule":
         schedule()
     elif a.cmd == "link":
