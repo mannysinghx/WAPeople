@@ -20,4 +20,4 @@ EXPOSE 8000
 
 # Default command: the website. Hosts like Railway inject $PORT; docker-compose overrides
 # this with its own commands for the web and sync services.
-CMD ["sh", "-c", "python -m wapeople.migrate && exec uvicorn wapeople.web.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*' --workers ${WEB_WORKERS:-2}"]
+CMD ["sh", "-c", "python -m wapeople.migrate && exec uvicorn wapeople.web.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*' --workers ${WEB_WORKERS:-2} 2>&1"]

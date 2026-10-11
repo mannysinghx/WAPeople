@@ -38,6 +38,9 @@ def migrate() -> list[str]:
             c.execute(path.read_text())
             c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (path.name,))
             applied_now.append(path.name)
+        # Reference data bundled with the code (district boundaries).
+        from .districts import ensure_loaded
+        ensure_loaded(c)
     return applied_now
 
 

@@ -1,0 +1,11 @@
+{
+  "name": "Washington State Legislative Districts 2024 (Remedial Map 3B)",
+  "publisher": "Washington State Office of Financial Management, via the Washington Geospatial Open Data Portal",
+  "source_url": "https://services.arcgis.com/bCYnGqM4FMTBSjd1/ArcGIS/rest/services/Washington_State_Legislative_Districts_2024/FeatureServer/0",
+  "legal_basis": "Court-ordered map, Soto Palmer v. Hobbs, No. 3:22-cv-05035-RSL (W.D. Wash., order of March 15, 2024); used for the 2024 and 2026 elections",
+  "source_last_edited": "2024-03-28",
+  "retrieved": "2026-10-11",
+  "processing": "mapshaper 0.6.102: -simplify dp interval=5 keep-shapes (topology-preserving, max 5 m deviation); -points inner for label positions; coordinates rounded to 1e-6 degrees",
+  "verification": "49 districts (1-49); largest district-area change 0.013% (LD 47), median 0.0015%; no overlaps or gaps between districts",
+  "note": "Boundaries include water areas, as in the official data."
+}

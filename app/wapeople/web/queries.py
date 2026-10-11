@@ -289,7 +289,8 @@ def list_members(
     c: psycopg.Connection, *, biennium: str, chamber: str = "", party: str = "", q: str = "",
     district: str = "",
 ) -> list[dict]:
-    where, params = ["mt.biennium = %(b)s"], {"b": biennium}
+    # Skip the roster's placeholder entries (named just "Senator", no district).
+    where, params = ["mt.biennium = %(b)s", "mt.district ~ '^[0-9]+$'"], {"b": biennium}
     if chamber in ("House", "Senate"):
         where.append("mt.agency = %(chamber)s")
         params["chamber"] = chamber

@@ -270,3 +270,36 @@ details.voters summary { cursor: pointer; font-weight: 700; color: var(--link); 
 .summary-box ul { margin: 0 0 .5rem; padding-left: 1.2rem; }
 .summary-box li { margin: .25rem 0; }
 .summary-box p { margin: 0; }
+
+/* District map */
+.map-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 1rem; margin-top: 1rem; align-items: start; }
+@media (max-width: 900px) { .map-layout { grid-template-columns: 1fr; } }
+.map-wrap { position: relative; }
+#map { height: min(72vh, 720px); min-height: 380px; border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; background: var(--surface-2); }
+@media (max-width: 600px) { #map { height: 60vh; } }
+.map-tools { position: absolute; top: 10px; right: 10px; display: flex; gap: .4rem; flex-wrap: wrap; z-index: 2; }
+.map-select { font: inherit; font-size: .875rem; padding: .35rem .5rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+.map-legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: .85rem; color: var(--muted); margin-top: .5rem; }
+.map-legend .sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: .35rem; vertical-align: -2px; opacity: .75; }
+.sw-D { background: #2f6fd6; } .sw-R { background: #d1423a; } .sw-split { background: #8e55c6; }
+.map-panel { position: sticky; top: 76px; }
+.map-panel h2 { margin-bottom: .5rem; }
+.member-list li { padding: .45rem 0; }
+.map-fallback { padding: 2rem 1rem; text-align: center; color: var(--muted); }
+.maplibregl-ctrl-attrib { font-size: 11px; }
+
+/* Contact form */
+.contact-form { max-width: 46rem; margin-top: 1rem; }
+.contact-form .field { margin-bottom: 1rem; }
+.contact-form label { display: block; font-weight: 700; margin-bottom: .3rem; }
+.contact-form input[type=text], .contact-form input[type=email], .contact-form select, .contact-form textarea {
+  width: 100%; font: inherit; padding: .6rem .7rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text);
+}
+.contact-form textarea { resize: vertical; min-height: 10rem; }
+.contact-form [aria-invalid="true"] { border-color: var(--t-bad); }
+.contact-form .req, .contact-form .opt { font-weight: 400; font-size: .8rem; color: var(--muted); margin-left: .25rem; }
+.contact-form .hint { font-size: .85rem; color: var(--muted); margin: .3rem 0 0; }
+.field-error { color: var(--t-bad); font-size: .88rem; margin: .3rem 0 0; }
+.form-error { background: var(--t-bad-bg); color: var(--t-bad); padding: .7rem .9rem; border-radius: 8px; }
+.grid-2.tight { gap: 0 1rem; }
+.hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }

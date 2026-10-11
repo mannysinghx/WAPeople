@@ -64,4 +64,5 @@
   {% endif %}
   {% if cc.full_text_source %}<p class="muted small">Scanned text source: {{ "official opinion PDF" if cc.full_text_source == "official_pdf" else "CourtListener" }}.</p>{% endif %}
 </section>
+<p class="small muted" style="margin-top:1.5rem"><a href="/contact?topic=correction&amp;page={{ path | urlencode }}">Report wrong or missing information on this page</a></p>
 {% endblock %}

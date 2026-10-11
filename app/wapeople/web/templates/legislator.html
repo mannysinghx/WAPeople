@@ -15,7 +15,10 @@
         {% if m.district %} · District {{ m.district }}{% endif %}
         {% if m.latest_biennium %} · most recent term {{ m.latest_biennium | biennium }}{% endif %}
       </div>
-      {% if m.email or m.phone %}<div class="small" style="margin-top:.25rem">Official contact: {% if m.email %}<a href="mailto:{{ m.email }}">{{ m.email }}</a>{% endif %}{% if m.email and m.phone %} · {% endif %}{{ m.phone or "" }}</div>{% endif %}
+      <div class="small" style="margin-top:.25rem">
+        {% if m.district and m.latest_biennium == current_biennium %}<a href="/map#{{ m.district }}">District {{ m.district }} on the map</a> · {% endif %}
+        <a href="https://leg.wa.gov/legislators/how-to-send-a-message-to-a-legislator/" rel="noopener">How to contact your legislator ↗</a>
+      </div>
     </div>
   </div>
   {% if m.terms %}
@@ -97,4 +100,5 @@
   {{ pager(listing, request) }}
   {% else %}<div class="card empty"><p>No recorded votes match.</p></div>{% endif %}
 {% endif %}
+<p class="small muted" style="margin-top:1.5rem"><a href="/contact?topic=correction&amp;page={{ path | urlencode }}">Report wrong or missing information on this page</a></p>
 {% endblock %}

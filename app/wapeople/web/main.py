@@ -1,18 +1,23 @@
 """WA People website (FastAPI + server-rendered Jinja2 templates)."""
 from __future__ import annotations
 
+import json
 import re
+import time
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .. import contact as C
 from ..courts.sync import CATEGORIES
 from ..db import conn
+from ..districts import current_biennium_with_roster, delegations, map_geojson, party_mix
 from ..legislature.parse import (
     FINAL_VOTE_KINDS, TYPE_NAMES, VOTE_KINDS, base_bill_id, biennium_for_year, session_law_text,
 )
@@ -22,6 +27,7 @@ from . import queries as Q
 
 HERE = Path(__file__).parent
 app = FastAPI(title="WA People", docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 
@@ -96,12 +102,12 @@ templates.env.globals.update(
 )
 
 
-def render(request: Request, name: str, **ctx) -> HTMLResponse:
+def render(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLResponse:
     with conn() as c:
         ctx.setdefault("updated", Q.last_updates(c))
     ctx["current_biennium"] = current_biennium()
     ctx["path"] = request.url.path
-    return templates.TemplateResponse(request, name, ctx)
+    return templates.TemplateResponse(request, name, ctx, status_code=status_code)
 
 
 def page_param(page: int) -> int:
@@ -334,6 +340,78 @@ def about(request: Request):
             "SELECT job, scope, started_at, finished_at, status FROM sync_runs ORDER BY id DESC LIMIT 12"
         ).fetchall()
     return render(request, "about.html", bienniums=bienniums, counts=counts, runs=runs)
+
+
+# ---- District map -------------------------------------------------------------------
+
+_map_cache: dict = {"at": 0.0, "body": None}
+
+
+@app.get("/api/districts.geojson")
+def districts_geojson():
+    """District boundaries with each district's current legislators (cached for 10 minutes)."""
+    if _map_cache["body"] is None or time.time() - _map_cache["at"] > 600:
+        with conn() as c:
+            _map_cache["body"] = json.dumps(map_geojson(c), separators=(",", ":"), default=str)
+        _map_cache["at"] = time.time()
+    return Response(_map_cache["body"], media_type="application/geo+json",
+                    headers={"Cache-Control": "public, max-age=900"})
+
+
+@app.get("/map", response_class=HTMLResponse)
+def district_map(request: Request):
+    with conn() as c:
+        biennium = current_biennium_with_roster(c)
+        dels = delegations(c, biennium) if biennium else {}
+        row = c.execute("SELECT source FROM legislative_districts LIMIT 1").fetchone()
+    districts = []
+    for d in range(1, 50):
+        dl = dels.get(d, {"senators": [], "representatives": []})
+        districts.append({"district": d, "mix": party_mix(dl), **dl})
+    return render(request, "map.html", districts=districts, biennium=biennium,
+                  source=row["source"] if row else None)
+
+
+# ---- Contact form -------------------------------------------------------------------
+
+def _deliver_pending() -> None:
+    with conn() as c:
+        C.send_pending(c, limit=5)
+
+
+@app.get("/contact", response_class=HTMLResponse)
+def contact_form(request: Request, topic: str = "", page: str = ""):
+    f = {"topic": topic if topic in C.TOPICS else "", "page": page[:300], "name": "", "email": "", "message": ""}
+    return render(request, "contact.html", f=f, errors={}, token=C.form_token(), TOPICS=C.TOPICS)
+
+
+@app.post("/contact", response_class=HTMLResponse)
+async def contact_submit(request: Request, background: BackgroundTasks):
+    form = await request.form()
+    data = {k: str(form.get(k) or "") for k in ("topic", "page", "name", "email", "message", "website", "token")}
+    if data["website"].strip():
+        # Honeypot field (hidden from people): only bots fill it. Pretend it worked.
+        return RedirectResponse("/contact/sent", status_code=303)
+    clean, errors = C.validate(data)
+    if not C.token_ok(data["token"]):
+        errors["form"] = ("This form expired or was sent too quickly. Please check your message and "
+                          "send it again.")
+    chash = C.client_hash(request.client.host if request.client else "")
+    with conn() as c:
+        if not errors and C.rate_limited(c, chash):
+            errors["form"] = "Too many messages from your connection recently. Please try again in an hour."
+        if not errors:
+            C.save(c, clean, chash)
+    if errors:
+        return render(request, "contact.html", status_code=400, f=data, errors=errors,
+                      token=C.form_token(), TOPICS=C.TOPICS)
+    background.add_task(_deliver_pending)
+    return RedirectResponse("/contact/sent", status_code=303)
+
+
+@app.get("/contact/sent", response_class=HTMLResponse)
+def contact_sent(request: Request):
+    return render(request, "contact_sent.html")
 
 
 @app.get("/healthz", response_class=PlainTextResponse)

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Contact us{% endblock %}
+{% block content %}
+<div class="prose">
+<h1>Contact us</h1>
+<p>Found something wrong or missing, like a bill status, a vote, a sponsor, or a court case? Have an idea for the site? Tell us below. The more detail you include (the bill number, the page, what you expected to see), the faster we can check and fix it.</p>
+</div>
+
+<form class="card contact-form" method="post" action="/contact" novalidate>
+  {% if errors.form %}<p class="form-error" role="alert">{{ errors.form }}</p>{% endif %}
+  <input type="hidden" name="token" value="{{ token }}">
+  <div class="hp" aria-hidden="true">
+    <label for="c-website">Leave this field empty</label>
+    <input id="c-website" type="text" name="website" tabindex="-1" autocomplete="off">
+  </div>
+
+  <div class="field">
+    <label for="c-topic">What is this about? <span class="req">required</span></label>
+    <select id="c-topic" name="topic" required{% if errors.topic %} aria-invalid="true" aria-describedby="e-topic"{% endif %}>
+      <option value="">Choose one…</option>
+      {% for key, label in TOPICS.items() %}<option value="{{ key }}"{% if f.topic == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    {% if errors.topic %}<p class="field-error" id="e-topic">{{ errors.topic }}</p>{% endif %}
+  </div>
+
+  <div class="field">
+    <label for="c-page">Which page, bill, legislator or case? <span class="opt">optional</span></label>
+    <input id="c-page" type="text" name="page" value="{{ f.page }}" maxlength="300" placeholder="e.g. HB 1217 (2025–26), or a page address">
+  </div>
+
+  <div class="field">
+    <label for="c-message">Your message <span class="req">required</span></label>
+    <textarea id="c-message" name="message" rows="9" maxlength="5000" required
+      placeholder="What's wrong or missing, and what should it say? Include a source if you have one."{% if errors.message %} aria-invalid="true" aria-describedby="e-message"{% endif %}>{{ f.message }}</textarea>
+    {% if errors.message %}<p class="field-error" id="e-message">{{ errors.message }}</p>{% else %}<p class="hint">At least 20 characters; up to 5,000.</p>{% endif %}
+  </div>
+
+  <div class="grid-2 tight">
+    <div class="field">
+      <label for="c-name">Your name <span class="opt">optional</span></label>
+      <input id="c-name" type="text" name="name" value="{{ f.name }}" maxlength="100" autocomplete="name">
+    </div>
+    <div class="field">
+      <label for="c-email">Your email, if you'd like a reply <span class="opt">optional</span></label>
+      <input id="c-email" type="email" name="email" value="{{ f.email }}" maxlength="254" autocomplete="email"{% if errors.email %} aria-invalid="true" aria-describedby="e-email"{% endif %}>
+      {% if errors.email %}<p class="field-error" id="e-email">{{ errors.email }}</p>{% endif %}
+    </div>
+  </div>
+
+  <p class="hint">We use your email only to reply to this message. We don't add you to any list, and we never share or publish what you send.</p>
+  <button class="btn" type="submit">Send message</button>
+</form>
+{% endblock %}

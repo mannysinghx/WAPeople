@@ -43,6 +43,24 @@ court decisions fill in over a few days without a CourtListener token), then ref
 To start from an existing database instead, restore a `scripts/backup.sh` dump into the Railway
 Postgres before the first run.
 
+## District map
+
+`/map` shows Washington's 49 legislative districts with each district's senator and two
+representatives. Boundaries are the official **Washington State Legislative Districts 2024**
+(court-ordered Remedial Map 3B) from the Office of Financial Management, simplified with
+mapshaper to within 5 m of the official lines (`scripts/build_districts.sh` rebuilds the file;
+provenance is in `app/wapeople/data/*.meta.json`). They're stored in the `legislative_districts`
+table at startup. Map rendering uses MapLibre GL JS (bundled in `static/vendor`) and OpenFreeMap tiles.
+
+## Contact form
+
+`/contact` stores every message in `contact_messages`, then emails it over SMTP to `CONTACT_TO`
+(Reply-To is the sender, if they gave an address). Configure `CONTACT_TO`, `SMTP_HOST`,
+`SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` (a Gmail App Password for Gmail) and `SITE_URL` in the
+server environment — never in the code; the address is not shown anywhere on the site. Undelivered
+messages are retried by the next submission and by the daily sync. Spam protection: hidden
+honeypot field, signed form timestamp, and per-connection rate limits (IPs are stored only as keyed hashes).
+
 ## Data sources
 
 | Data | Source |

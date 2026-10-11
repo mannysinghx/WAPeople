@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "_macros.html" import party %}
+{% block title %}Legislative district map{% endblock %}
+{% block description %}Map of Washington's 49 legislative districts with each district's senator and two representatives.{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/vendor/maplibre-gl-4.7.1/maplibre-gl.css">
+<script src="/static/vendor/maplibre-gl-4.7.1/maplibre-gl.js" defer></script>
+<script src="/static/map.js?v=3" defer></script>
+{% endblock %}
+{% block content %}
+<div class="spread">
+  <h1>Legislative district map</h1>
+  <span class="muted small">{{ biennium | biennium }} Legislature · 49 districts · 1 senator and 2 representatives each</span>
+</div>
+<p class="muted" style="max-width:52rem">Click a district to see who represents it, or use <strong>Find my district</strong> (your location stays in your browser). Zoom in to see legislators' names on the map.</p>
+
+<div class="map-layout">
+  <div class="map-wrap">
+    <div id="map" role="application" aria-label="Map of Washington legislative districts"></div>
+    <div class="map-tools">
+      <button class="btn small" id="locate" type="button">Find my district</button>
+      <label class="sr-only" for="jump">Go to district</label>
+      <select id="jump" class="map-select">
+        <option value="">Go to district…</option>
+        {% for d in districts %}<option value="{{ d.district }}">District {{ d.district }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="map-legend" aria-label="Legend">
+      <span><i class="sw sw-D"></i>All Democrats</span>
+      <span><i class="sw sw-R"></i>All Republicans</span>
+      <span><i class="sw sw-split"></i>Split delegation</span>
+    </div>
+    <noscript><p class="map-fallback">The interactive map needs JavaScript. Every district and its legislators are listed below.</p></noscript>
+  </div>
+  <aside class="card map-panel" id="panel" aria-live="polite">
+    <h2 id="panel-title">Choose a district</h2>
+    <div id="panel-body"><p class="muted">Select a district on the map or from the list to see its senator and representatives.</p></div>
+  </aside>
+</div>
+
+<section style="margin-top:1.5rem">
+  <h2>All districts</h2>
+  <div class="table-wrap">
+  <table class="rtable" id="district-table">
+    <thead><tr><th scope="col">District</th><th scope="col">Senator</th><th scope="col">Representatives</th></tr></thead>
+    <tbody>
+    {% for d in districts %}
+      <tr id="ld-{{ d.district }}">
+        <td class="bill-id"><a href="#{{ d.district }}" data-district="{{ d.district }}">District {{ d.district }}</a></td>
+        <td data-label="Senator">{% for m in d.senators %}<a href="/legislators/{{ m.id }}">{{ m.name }}</a> {{ party(m.party) }}{% else %}<span class="muted">Vacant</span>{% endfor %}</td>
+        <td data-label="Representatives">{% for m in d.representatives %}<a href="/legislators/{{ m.id }}">{{ m.name }}</a> {{ party(m.party) }}{% if not loop.last %}<br>{% endif %}{% else %}<span class="muted">Vacant</span>{% endfor %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<p class="muted small" style="margin-top:1rem">
+  Boundaries: {{ source.name if source else "Washington State Legislative Districts" }}, published by the Washington State Office of Financial Management
+  {%- if source %} (court-ordered map used for the 2024 and 2026 elections){% endif %}. Shown within 5 meters of the official lines; districts include water areas as in the official data.
+  Members shown are those serving now, based on recorded votes; see the <a href="https://leg.wa.gov/legislators/" rel="noopener">Legislature's directory ↗</a> for official details.
+  Base map: <a href="https://openfreemap.org" rel="noopener">OpenFreeMap</a> © OpenMapTiles, data © <a href="https://www.openstreetmap.org/copyright" rel="noopener">OpenStreetMap contributors</a>.
+</p>
+{% endblock %}
