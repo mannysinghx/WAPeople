@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --upgrade pip==26.2.1 && pip install -r requirements.txt
 
 COPY wapeople ./wapeople
 COPY tests ./tests
@@ -19,5 +19,6 @@ USER app
 EXPOSE 8000
 
 # Default command: the website. Hosts like Railway inject $PORT; docker-compose overrides
-# this with its own commands for the web and sync services.
-CMD ["sh", "-c", "python -m wapeople.migrate && exec uvicorn wapeople.web.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*' --workers ${WEB_WORKERS:-2} 2>&1"]
+# this with its own commands for the web and sync services. No access log: we don't keep
+# visitors' IP addresses (the hosting provider's edge logs cover operations).
+CMD ["sh", "-c", "python -m wapeople.migrate && exec uvicorn wapeople.web.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*' --workers ${WEB_WORKERS:-2} --no-access-log --no-server-header 2>&1"]

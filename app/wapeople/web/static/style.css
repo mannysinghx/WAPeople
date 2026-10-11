@@ -303,3 +303,10 @@ details.voters summary { cursor: pointer; font-weight: 700; color: var(--link); 
 .form-error { background: var(--t-bad-bg); color: var(--t-bad); padding: .7rem .9rem; border-radius: 8px; }
 .grid-2.tight { gap: 0 1rem; }
 .hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+
+/* Legal pages */
+.legal h2 { margin-top: 1.75rem; }
+.legal h3 { margin-top: 1.25rem; }
+.legal-summary { margin: 1rem 0 1.5rem; }
+.legal-summary h2 { margin-top: 0; }
+.legal-summary ul { margin-bottom: 0; }

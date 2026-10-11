@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Disclaimer{% endblock %}
+{% block content %}
+<div class="prose legal">
+<h1>Disclaimer</h1>
+<p class="muted">Last updated {{ updated_on | date(True) }}</p>
+
+<h2>Not an official government website</h2>
+<p>WA People is an independent, nonpartisan project. It isn't operated by, affiliated with, or endorsed by the Washington State Legislature, the Washington State courts, the Office of the Secretary of State, the Office of Financial Management, or any other government body or political party. For official information, use the <a href="https://leg.wa.gov/" rel="noopener">Washington State Legislature</a> and <a href="https://www.courts.wa.gov/" rel="noopener">Washington Courts</a> websites.</p>
+
+<h2>Not legal advice</h2>
+<p>Everything on WA People is general information for educating the public. It isn't legal advice and doesn't create an attorney-client relationship. Bill summaries, status descriptions, and court-case listings aren't a substitute for reading the actual bill, law, or opinion. If you need advice about how a law or decision affects you, consult a licensed attorney.</p>
+
+<h2>Accuracy and completeness</h2>
+<p>We work hard to be accurate, and the site is compiled automatically from official public records. Even so, it may contain errors, omissions, or delays, and the official record always prevails. In particular:</p>
+<ul>
+  <li><strong>Timing:</strong> data is refreshed once a day, so very recent actions may not appear yet.</li>
+  <li><strong>Bill stages</strong> ("in committee," "passed House," "did not pass," and so on) are our plain-language reading of the Legislature's status codes and votes.</li>
+  <li><strong>Bill summaries</strong> are written by the Legislature's nonpartisan staff and describe the version of the bill named with each summary, which may differ from the final law.</li>
+  <li><strong>Older records:</strong> step-by-step bill history isn't available from the Legislature for sessions before 2001, and a small number of older vote records are incomplete in the original data.</li>
+  <li><strong>Supreme Court cases</strong> are selected by published, rule-based criteria and may not include every relevant decision. Inclusion doesn't mean a case is important or that it changed a law.</li>
+  <li><strong>District boundaries</strong> on the map are drawn within about 5 meters of the official lines, for reference only. Don't use them to determine your voting district or for any legal purpose. Check with your county elections office or the Secretary of State.</li>
+  <li><strong>Current legislators</strong> are determined from official rosters and voting records. Recent appointments or resignations may take time to appear.</li>
+</ul>
+<p>Always confirm important information with the official source linked on each page. If you spot a mistake, please <a href="/contact?topic=correction">tell us</a> so we can fix it.</p>
+
+<h2>Nonpartisan</h2>
+<p>WA People doesn't support or oppose any candidate, party, bill, or ballot measure. Party labels come from the Legislature's official records. Colors on the map show party composition only.</p>
+
+<h2>Links to other websites</h2>
+<p>Links to official and third-party websites are provided for convenience. We aren't responsible for their content, accuracy, or availability, and a link isn't an endorsement.</p>
+
+<h2>Use at your own risk</h2>
+<p>You use the information on this site at your own risk. See our <a href="/terms">terms of use</a> for the full terms, including the limitation of liability.</p>
+</div>
+{% endblock %}

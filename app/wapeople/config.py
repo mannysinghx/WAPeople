@@ -29,5 +29,7 @@ SMTP_FROM = os.environ.get("SMTP_FROM") or SMTP_USER
 # STARTTLS is required for real providers (Gmail: smtp.gmail.com:587); "false" only for local test servers.
 SMTP_STARTTLS = (os.environ.get("SMTP_STARTTLS") or "true").lower() != "false"
 SITE_URL = (os.environ.get("SITE_URL") or "").rstrip("/")
+# How long contact-form messages are kept before automatic deletion (stated on /privacy).
+CONTACT_RETENTION_DAYS = int(os.environ.get("CONTACT_RETENTION_DAYS") or 730)
 # Key for form tokens and rate-limit hashes; falls back to one derived from the database URL.
 SECRET_KEY = os.environ.get("SECRET_KEY") or None

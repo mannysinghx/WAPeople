@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -24,10 +24,12 @@ from ..legislature.parse import (
 from ..legislature.stages import STAGES, next_session_start
 from ..legislature.sync import current_biennium
 from . import queries as Q
+from .security import SecurityMiddleware
 
 HERE = Path(__file__).parent
 app = FastAPI(title="WA People", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.add_middleware(SecurityMiddleware)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 
@@ -412,6 +414,46 @@ async def contact_submit(request: Request, background: BackgroundTasks):
 @app.get("/contact/sent", response_class=HTMLResponse)
 def contact_sent(request: Request):
     return render(request, "contact_sent.html")
+
+
+# ---- Legal and security pages --------------------------------------------------------
+
+LEGAL_UPDATED = date(2026, 10, 11)
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy(request: Request):
+    return render(request, "privacy.html", updated_on=LEGAL_UPDATED, retention_days=C.RETENTION_DAYS,
+                  hash_days=C.CLIENT_HASH_DAYS)
+
+
+@app.get("/terms", response_class=HTMLResponse)
+def terms(request: Request):
+    return render(request, "terms.html", updated_on=LEGAL_UPDATED)
+
+
+@app.get("/disclaimer", response_class=HTMLResponse)
+def disclaimer(request: Request):
+    return render(request, "disclaimer.html", updated_on=LEGAL_UPDATED)
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+def robots():
+    return ("User-agent: *\n"
+            "Allow: /\n"
+            "Disallow: /contact\n"
+            "Disallow: /search\n")
+
+
+@app.get("/.well-known/security.txt", response_class=PlainTextResponse)
+def security_txt(request: Request):
+    base = str(request.base_url).rstrip("/")
+    expires = (datetime.now().astimezone() + timedelta(days=180)).strftime("%Y-%m-%dT00:00:00.000Z")
+    return (f"Contact: {base}/contact?topic=security\n"
+            f"Expires: {expires}\n"
+            "Preferred-Languages: en\n"
+            f"Policy: {base}/privacy#security\n"
+            f"Canonical: {base}/.well-known/security.txt\n")
 
 
 @app.get("/healthz", response_class=PlainTextResponse)

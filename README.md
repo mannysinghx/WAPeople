@@ -61,6 +61,19 @@ server environment — never in the code; the address is not shown anywhere on t
 messages are retried by the next submission and by the daily sync. Spam protection: hidden
 honeypot field, signed form timestamp, and per-connection rate limits (IPs are stored only as keyed hashes).
 
+## Security and privacy
+
+- Security headers on every response (`app/wapeople/web/security.py`): strict Content-Security-Policy
+  (scripts only from this site; OpenFreeMap is the only third-party host, for map tiles), HSTS on HTTPS,
+  `X-Frame-Options: DENY`, `nosniff`, Referrer-Policy, Permissions-Policy (only geolocation, for "Find my
+  district"), and a 64 KB request-body cap.
+- No cookies, analytics, or access logs of visitor IPs (`uvicorn --no-access-log`). Contact messages are
+  deleted after `CONTACT_RETENTION_DAYS` (default 730) and their keyed IP hashes cleared after 7 days by the
+  daily sync, as promised on `/privacy`.
+- Pages: `/privacy`, `/terms`, `/disclaimer`; `/.well-known/security.txt` points to the contact form.
+- Dependencies are pinned; check them with
+  `docker compose run --rm --no-deps -u root sync sh -c "pip install -q pip-audit && pip-audit"`.
+
 ## Data sources
 
 | Data | Source |

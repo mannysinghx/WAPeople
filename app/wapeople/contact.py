@@ -26,6 +26,7 @@ TOPICS = {
     "correction": "Report wrong or missing information",
     "feedback": "Feedback about the site",
     "feature": "Suggest an improvement",
+    "security": "Report a security problem",
     "other": "Something else",
 }
 MIN_FILL_SECONDS = 3          # humans take longer than this to write a message
@@ -33,6 +34,10 @@ TOKEN_MAX_AGE = 24 * 3600
 PER_CLIENT_PER_HOUR = 5
 SITE_WIDE_PER_DAY = 200
 MAX_ATTEMPTS = 5
+# Privacy policy commitments (see /privacy): messages are deleted after RETENTION_DAYS, and the
+# keyed IP hash used for rate limiting is cleared after CLIENT_HASH_DAYS.
+RETENTION_DAYS = config.CONTACT_RETENTION_DAYS
+CLIENT_HASH_DAYS = 7
 
 _EMAIL_RE = re.compile(r"^[^@\s<>\"'(),;:\\\[\]]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}$")
 
@@ -187,3 +192,18 @@ def send_pending(conn: psycopg.Connection, limit: int = 20) -> dict:
             )
         conn.commit()
     return {"contact_sent": sent, "contact_failed": failed}
+
+
+def apply_retention(conn: psycopg.Connection) -> dict:
+    """Enforce the privacy policy: clear old rate-limit hashes, delete messages past retention."""
+    cleared = conn.execute(
+        "UPDATE contact_messages SET client_hash = '' WHERE client_hash <> ''"
+        " AND created_at < now() - make_interval(days => %s)",
+        (CLIENT_HASH_DAYS,),
+    ).rowcount
+    deleted = conn.execute(
+        "DELETE FROM contact_messages WHERE created_at < now() - make_interval(days => %s)",
+        (RETENTION_DAYS,),
+    ).rowcount
+    conn.commit()
+    return {"contact_hashes_cleared": cleared, "contact_deleted": deleted}

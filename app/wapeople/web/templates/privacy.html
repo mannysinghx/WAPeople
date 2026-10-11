@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Privacy policy{% endblock %}
+{% block content %}
+<div class="prose legal">
+<h1>Privacy policy</h1>
+<p class="muted">Last updated {{ updated_on | date(True) }}</p>
+
+<p>WA People is a free, nonpartisan website about Washington State legislation. We built it to collect as little information about you as possible. This policy explains exactly what that is.</p>
+
+<div class="card legal-summary">
+  <h2>The short version</h2>
+  <ul>
+    <li>No accounts, no cookies, no ads, no analytics, and no tracking of any kind.</li>
+    <li>We don't sell, rent, or trade personal information, ever.</li>
+    <li>If you use the contact form, we use what you send only to read and answer it, and we delete it after {{ (retention_days / 365) | round | int }} years.</li>
+    <li>"Find my district" works entirely in your browser. Your location is never sent to us.</li>
+  </ul>
+</div>
+
+<h2>What we collect, and why</h2>
+
+<h3>When you browse the site</h3>
+<p>Like every website, our hosting provider processes basic technical information to deliver pages and protect the service from abuse: your IP address, browser type, the page you asked for, and the time. The provider keeps it in its own logs for a limited time under its own policies. Our application does <strong>not</strong> keep its own logs of visitors' IP addresses.</p>
+<p>Searches you type are sent to our server so we can show results. We don't connect them to you or save them in our database. They may appear in the hosting provider's technical logs like any other page address.</p>
+
+<h3>When you use the contact form</h3>
+<p>We store what you choose to send: the topic, the page you mention, your message, and your name and email address if you give them (both optional). To stop spam, we also store a one-way, keyed scramble ("hash") of your IP address. It can't be turned back into your address, and we erase it after {{ hash_days }} days.</p>
+<p>Your message is saved in our database and delivered to the site's private email inbox, which is hosted by an email provider. We use your email address only to reply to you. We never add it to a mailing list, publish it, or share it. Messages are deleted automatically after {{ (retention_days / 365) | round | int }} years, or sooner if you ask.</p>
+
+<h3>"Find my district" on the map</h3>
+<p>If you press <strong>Find my district</strong>, your browser asks your permission to share your location. If you allow it, the district is worked out on your own device. Your location is never sent to WA People or stored anywhere.</p>
+
+<h3>The district map</h3>
+<p>The map's background imagery (streets, place names) is loaded by your browser directly from <a href="https://openfreemap.org" rel="noopener">OpenFreeMap</a>, a free, open-source map service. Like any website your browser contacts, it receives your IP address and browser information. Its use is governed by its own policies. No other page on WA People loads anything from a third party.</p>
+
+<h2>What we don't do</h2>
+<ul>
+  <li>We don't use cookies, local storage, or similar technologies.</li>
+  <li>We don't use analytics, advertising, social-media widgets, tracking pixels, or browser fingerprinting.</li>
+  <li>We don't sell, rent, or share personal information for marketing or any other purpose.</li>
+  <li>We don't create profiles of visitors.</li>
+</ul>
+
+<h2>Public records on this site</h2>
+<p>Legislators' names, parties, districts, sponsorships, and votes are public records published by the Washington State Legislature. Court decisions are public records published by the courts. WA People republishes these records to inform the public. They're not information we collect from visitors.</p>
+
+<h2>Who else sees information</h2>
+<p>Only the service providers we need to run the site, and only for that purpose: our hosting provider (which runs the website and database) and our email provider (which delivers contact-form messages to us). We may also disclose information if the law requires it.</p>
+
+<h2 id="security">How we keep the site and your information secure</h2>
+<ul>
+  <li>The whole site is served only over encrypted HTTPS connections.</li>
+  <li>Every page sends strict security headers: a content security policy that blocks scripts from anywhere but this site, protection against being embedded in other sites (clickjacking), and limits on which browser features pages may use.</li>
+  <li>We keep personal information to a minimum: no accounts and no passwords, so there is nothing to steal there.</li>
+  <li>The database isn't reachable from the internet. Passwords and keys are kept out of our public source code.</li>
+  <li>The contact form is protected against spam and abuse, and request sizes are limited.</li>
+  <li>We check the software we depend on for known security vulnerabilities and keep it up to date.</li>
+</ul>
+<p>No system is perfectly secure, but we work to protect the little information we hold. If you find a security problem, please <a href="/contact?topic=security">report it to us</a>. We appreciate responsible disclosure.</p>
+
+<h2>Your choices</h2>
+<p>You can use the whole site without telling us anything about yourself. If you've contacted us, you can ask us to show you or delete what you sent: just <a href="/contact">contact us</a> and mention the message.</p>
+
+<h2>Children</h2>
+<p>WA People is a general-audience site about public affairs. It isn't directed at children under 13, and we don't knowingly collect personal information from them. If you believe a child has sent us personal information, please <a href="/contact">contact us</a> and we'll delete it.</p>
+
+<h2>Changes to this policy</h2>
+<p>If we change how we handle information, we'll update this page and the date at the top. We won't start collecting more information about you without clearly saying so here first.</p>
+
+<h2>Questions</h2>
+<p>Please use our <a href="/contact">contact form</a>.</p>
+</div>
+{% endblock %}

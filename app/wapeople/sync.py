@@ -18,7 +18,7 @@ import time
 from datetime import date, datetime
 
 from .config import SYNC_HOUR_LOCAL
-from .contact import send_pending
+from .contact import apply_retention, send_pending
 from .courts.client import RateLimited
 from .courts.sync import CourtSync
 from .db import connect
@@ -148,6 +148,7 @@ def refresh(today: date | None = None) -> None:
     def contact_retry() -> None:
         with connect() as conn, tracked_run("contact", "deliver") as stats:
             stats.update(send_pending(conn))
+            stats.update(apply_retention(conn))
 
     for name, step in (
         ("legislature", lambda: sync_legislature(targets, scope="refresh")),
