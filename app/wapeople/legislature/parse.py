@@ -88,24 +88,78 @@ def biennium_years(biennium: str) -> tuple[int, int]:
     return start, start + 1
 
 
-def roll_call_result(yeas: int, nays: int, lines: list[str]) -> str | None:
-    """Find the history line recording this vote (same counts) and read its outcome."""
+def matching_history_line(yeas: int, nays: int, lines: list[str]) -> str | None:
+    """The history line that records a vote with these counts, if any."""
     for line in lines:
         m = YEAS_NAYS_RE.search(line)
-        if not m or int(m[1]) != yeas or int(m[2]) != nays:
-            continue
-        low = line.lower()
-        for word, result in (
-            ("failed", "failed"),
-            ("not adopted", "failed"),
-            ("passed", "passed"),
-            ("adopted", "adopted"),
-            ("confirmed", "confirmed"),
-            ("concurred", "concurred"),
-            ("override", "override"),
-            ("sustain", "failed"),
-        ):
-            if word in low:
-                return result
-        return "recorded"
+        if m and int(m[1]) == yeas and int(m[2]) == nays:
+            return line
     return None
+
+
+def roll_call_result(yeas: int, nays: int, lines: list[str]) -> str | None:
+    """Find the history line recording this vote (same counts) and read its outcome."""
+    line = matching_history_line(yeas, nays, lines)
+    if line is None:
+        return None
+    low = line.lower()
+    for word, result in (
+        ("failed", "failed"),
+        ("not adopted", "failed"),
+        ("passed", "passed"),
+        ("adopted", "adopted"),
+        ("confirmed", "confirmed"),
+        ("concurred", "concurred"),
+        ("override", "override"),
+        ("sustain", "failed"),
+    ):
+        if word in low:
+            return result
+    return "recorded"
+
+
+# What a roll call was about. The Legislature's motion text varies by year and chamber
+# ("Final Passage", "FP as Amd by the House", "7th Order: 3rd Reading", or blank).
+VOTE_KINDS = {
+    "final_passage": "Final passage",
+    "concurrence": "Resolving differences between chambers",
+    "confirmation": "Confirmation",
+    "adoption": "Adoption",
+    "veto_override": "Veto override",
+    "amendment": "Amendment",
+    "procedural": "Procedural motion",
+}
+FINAL_VOTE_KINDS = ("final_passage", "concurrence", "confirmation", "adoption", "veto_override")
+
+_FINAL_RE = re.compile(r"final passage|(?<![a-z])fp(?![a-z])|3rd reading|third reading", re.I)
+_AMENDMENT_RE = re.compile(r"^\s*(com\s+)?\S*\d+\s+\S.*(pg\s+\d+|striker)|^amd\b|amendment number|\bamendment\b|striker", re.I)
+
+
+def classify_vote(motion: str | None, history_line: str | None = None) -> str:
+    m = " ".join((motion or "").split()).lower()
+    if not m:
+        h = (history_line or "").lower()
+        if "third reading" in h or "final passage" in h:
+            return "final_passage"
+        if "concur" in h:
+            return "concurrence"
+        if "confirm" in h:
+            return "confirmation"
+        if "adopt" in h:
+            return "adoption"
+        return "procedural"
+    if m.startswith(("motion to", "suspend", "demand", "refer", "postpone", "grant", "immediately")):
+        return "procedural"
+    if "veto" in m or "notwithstanding" in m:
+        return "veto_override"
+    if "confirm" in m:
+        return "confirmation"
+    if m.startswith(("concur", "recede")) or ("concur" in m and "motion" in m):
+        return "concurrence"
+    if m.startswith("adopt"):
+        return "adoption"
+    if _FINAL_RE.search(m):
+        return "final_passage"
+    if _AMENDMENT_RE.search(m):
+        return "amendment"
+    return "procedural"

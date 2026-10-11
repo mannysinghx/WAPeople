@@ -35,9 +35,10 @@ Tests: `docker compose run --rm --no-deps sync python -m pytest -q -p no:cachepr
 | Bills, versions, sponsors, history, roll calls, legislators | [WA Legislature web services](https://wslwebservices.leg.wa.gov/) (public, no key) |
 | Supreme Court decisions | [CourtListener](https://www.courtlistener.com/) search API (Free Law Project) + official PDFs from [courts.wa.gov](https://www.courts.wa.gov/opinions/) |
 
-Anonymous CourtListener access is rate limited, so the first court load is slow (it throttles and
-backs off automatically). Set `COURTLISTENER_API_TOKEN` in `.env` (free account) for faster syncs
-and full opinion text for pre-PDF-era cases.
+Anonymous CourtListener access is limited to 50 requests per hour. The first court load needs about
+120 requests, so it takes roughly 2.5 hours (it paces itself automatically). Daily updates need only a
+handful of requests. Set `COURTLISTENER_API_TOKEN` in `.env` (free account, 5,000 requests/hour) to make
+the first load take minutes and to get full opinion text for older cases that have no PDF.
 
 ## How it works
 

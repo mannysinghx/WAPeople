@@ -37,7 +37,7 @@
 
 <nav class="tabs" aria-label="Record">
   <a href="?tab=votes"{% if tab == "votes" %} aria-current="page"{% endif %}>Voting record</a>
-  <a href="?tab=bills"{% if tab == "bills" %} aria-current="page"{% endif %}>Sponsored bills</a>
+  <a href="?tab=bills"{% if tab == "bills" %} aria-current="page"{% endif %}>Sponsored &amp; co-sponsored bills</a>
 </nav>
 
 <form class="filters" method="get">
@@ -64,7 +64,7 @@
   <div>
     <label for="m-f">Which votes</label>
     <select id="m-f" name="final">
-      <option value="1"{% if f.final == "1" %} selected{% endif %}>Final passage only</option>
+      <option value="1"{% if f.final == "1" %} selected{% endif %}>Final votes only</option>
       <option value="0"{% if f.final != "1" %} selected{% endif %}>All recorded votes</option>
     </select>
   </div>
@@ -86,7 +86,7 @@
       <tr>
         <td class="nowrap">{{ v.vote_date | date }}</td>
         <td class="desc"><a class="bill-id" href="{{ bill_url(v.biennium, v.bill_id) }}">{{ v.bill_id }}</a> <span class="muted small">({{ v.biennium | biennium }})</span><span class="sub">{{ v.short_description }}</span></td>
-        <td data-label="Motion"><a href="/votes/{{ v.roll_call_id }}">{{ v.motion | motion }}</a><div class="muted small">{{ v.agency }}</div></td>
+        <td data-label="Motion"><a href="/votes/{{ v.roll_call_id }}">{{ v.motion | motion(v.vote_kind) }}</a><div class="muted small">{{ v.agency }}</div></td>
         <td data-label="Vote"><span class="badge {{ 'tone-law' if v.vote == 'Yea' else ('tone-bad' if v.vote == 'Nay' else 'tone-muted') }}">{{ v.vote }}</span></td>
         <td data-label="Outcome">{{ v.yeas }}–{{ v.nays }} {{ result_badge(v.result) }}</td>
       </tr>

@@ -183,3 +183,51 @@ def test_group_versions_keeps_live_copy_of_duplicated_version():
     groups = group_versions(vs)
     assert len(groups[(2487, "B")]) == 2
     assert pick_current(groups[(2487, "B")])["status"] == "C 263 L 26"
+
+
+def test_classify_vote_handles_every_motion_style():
+    from wapeople.legislature.parse import classify_vote
+
+    cases = {
+        "3rd Reading & Final Passage": "final_passage",
+        "Final Passage as Amended by the House": "final_passage",
+        "FP as Amd by the Senate": "final_passage",
+        "FP w/o House Amd": "final_passage",
+        "7th Order: 3rd Reading": "final_passage",
+        "6th Order:         2nd Reading": "procedural",
+        "Motion to Place Measure on 3rd Reading & Final Passage": "procedural",
+        "The Appointment be Confirmed": "confirmation",
+        "Confirm": "confirmation",
+        "Concur in Senate Amendment(s)": "concurrence",
+        "MOTION BY SENATOR SNYDER TO CONCUR IN THE HOUSE AMENDMENTS TO ESB 6183 - FAILED.": "concurrence",
+        "Passage notwithstanding the Governor's Veto": "veto_override",
+        "Adoption": "adoption",
+        "2612  Reeves  Pg 5 Ln 33": "amendment",
+        "258   Fraser            Striker": "amendment",
+        "Amd #294 by Sen. Doumit": "amendment",
+        "Amendment Number 38 by Senator Frockt, on Page 64, Line 2": "amendment",
+        "Grant Conference": "procedural",
+    }
+    for motion, kind in cases.items():
+        assert classify_vote(motion) == kind, motion
+    # 2003-04 Senate roll calls have no motion text; fall back to the matched history line.
+    assert classify_vote(None, "Third reading, passed;  yeas, 48; nays, 0; absent, 0; excused, 1.") == "final_passage"
+    assert classify_vote("", None) == "procedural"
+
+
+def test_dedupe_roll_calls():
+    from wapeople.legislature.sync import dedupe_roll_calls
+
+    rc = {"agency": "Senate", "sequence_number": 8, "vote_date": date(2003, 4, 2), "motion": None,
+          "yeas": 48, "nays": 0, "absent": 0, "excused": 1, "votes": []}
+    assert len(dedupe_roll_calls([rc, dict(rc), dict(rc)])) == 1
+    assert len(dedupe_roll_calls([rc, dict(rc, sequence_number=9)])) == 2
+
+
+def test_dedupe_roll_calls_ignores_motion_text_and_keeps_labeled_copy():
+    from wapeople.legislature.sync import dedupe_roll_calls
+
+    base = {"agency": "Senate", "sequence_number": 3, "vote_date": date(2003, 2, 26),
+            "yeas": 49, "nays": 0, "absent": 0, "excused": 0, "votes": []}
+    out = dedupe_roll_calls([dict(base, motion=None), dict(base, motion="3rd Reading & Final Passage")])
+    assert len(out) == 1 and out[0]["motion"] == "3rd Reading & Final Passage"

@@ -3,7 +3,7 @@
 {% block title %}{% if f.bucket %}{{ BUCKETS[f.bucket] }} bills{% else %}Bills{% endif %}{% endblock %}
 {% block content %}
 <div class="spread">
-  <h1>{% if sponsor_row %}Bills sponsored by {{ sponsor_row.name }}{% elif f.bucket %}{{ BUCKETS[f.bucket] }} bills{% else %}All bills{% endif %}</h1>
+  <h1>{% if sponsor_row %}Bills sponsored or co-sponsored by {{ sponsor_row.name }}{% elif f.bucket %}{{ BUCKETS[f.bucket] }} bills{% else %}All bills{% endif %}</h1>
 </div>
 
 <nav class="tabs" aria-label="Bill status">

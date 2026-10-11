@@ -13,7 +13,9 @@ from fastapi.templating import Jinja2Templates
 
 from ..courts.sync import CATEGORIES
 from ..db import conn
-from ..legislature.parse import TYPE_NAMES, base_bill_id, biennium_for_year, session_law_text
+from ..legislature.parse import (
+    FINAL_VOTE_KINDS, TYPE_NAMES, VOTE_KINDS, base_bill_id, biennium_for_year, session_law_text,
+)
 from ..legislature.stages import STAGES, next_session_start
 from ..legislature.sync import current_biennium
 from . import queries as Q
@@ -45,9 +47,9 @@ def bill_url(biennium: str, bill_id: str) -> str:
 _AMEND_RE = re.compile(r"^(\d+)\s+(.+?)\s+Pg\s+(\d+)\s+Ln\s+(\d+)$")
 
 
-def motion_label(motion: str | None) -> str:
-    if not motion:
-        return "Vote"
+def motion_label(motion: str | None, kind: str | None = None) -> str:
+    if not motion or not motion.strip():
+        return VOTE_KINDS.get(kind or "", "Recorded vote")
     m = _AMEND_RE.match(" ".join(motion.split()))
     if m:
         return f"Amendment {m[1]} by {m[2]} (page {m[3]}, line {m[4]})"
@@ -164,7 +166,7 @@ def progress_steps(bill: dict, actions: list[dict], rolls: list[dict]) -> list[d
 
     def passed_on(chamber):
         return next((r["vote_date"] for r in rolls if r["agency"] == chamber
-                     and "final passage" in (r["motion"] or "").lower() and r["result"] in ("passed", None)), None)
+                     and r["vote_kind"] == "final_passage" and r["result"] in ("passed", None)), None)
 
     out_of_committee = flags[origin] or bill["stage"] in ("floor", "failed_vote") or any(
         ("rules" in line and ("passed to rules" in line or "referred to rules" in line))
@@ -210,8 +212,7 @@ def bill_detail(request: Request, biennium: str, slug: str):
         rolls = Q.bill_roll_calls(c, bill)
         cases = Q.bill_cases(c, bill["id"])
         others = Q.other_sessions(c, bill)
-    final_rolls = [r for r in rolls if "final passage" in (r["motion"] or "").lower()
-                   or (r["motion"] or "").lower().startswith(("the appointment", "concur", "adoption"))]
+    final_rolls = [r for r in rolls if r["vote_kind"] in FINAL_VOTE_KINDS]
     other_rolls = [r for r in rolls if r not in final_rolls]
     return render(
         request, "bill.html", bill=bill, sponsors=sponsors, actions=actions,

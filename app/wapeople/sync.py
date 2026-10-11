@@ -109,12 +109,27 @@ def refresh(today: date | None = None) -> None:
     today = today or date.today()
     bs = all_bienniums(today)
     targets = [bs[-1]] + ([bs[-2]] if today.month == 1 else [])
-    sync_legislature(targets, scope="refresh")
-    sync_upcoming()
-    with connect() as conn, tracked_run("courts", "refresh") as stats:
-        cs = CourtSync(conn)
-        stats.update(cs.refresh())
-        cs.cl.close()
+
+    def courts_refresh() -> None:
+        with connect() as conn, tracked_run("courts", "refresh") as stats:
+            cs = CourtSync(conn)
+            stats.update(cs.refresh())
+            cs.cl.close()
+
+    # Independent steps: one source being down must not block the others.
+    failed = []
+    for name, step in (
+        ("legislature", lambda: sync_legislature(targets, scope="refresh")),
+        ("prefiled", sync_upcoming),
+        ("courts", courts_refresh),
+    ):
+        try:
+            step()
+        except Exception:
+            log.exception("refresh step %s failed", name)
+            failed.append(name)
+    if failed:
+        raise RuntimeError(f"refresh steps failed: {', '.join(failed)}")
 
 
 def last_ok(job_scope: str) -> datetime | None:
@@ -128,6 +143,7 @@ def last_ok(job_scope: str) -> datetime | None:
 
 def schedule() -> None:
     migrate()
+    last_attempt = 0.0
     while True:
         try:
             if incomplete_bienniums():
@@ -135,7 +151,9 @@ def schedule() -> None:
             now = datetime.now().astimezone()
             last = last_ok("courts:refresh")
             due = last is None or (now - last).total_seconds() > 20 * 3600
-            if due and now.hour >= SYNC_HOUR_LOCAL:
+            # After a failed attempt, wait a few hours rather than hammering the sources.
+            if due and now.hour >= SYNC_HOUR_LOCAL and time.time() - last_attempt > 3 * 3600:
+                last_attempt = time.time()
                 log.info("daily refresh starting")
                 refresh()
         except Exception:

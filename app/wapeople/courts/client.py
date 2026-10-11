@@ -39,7 +39,8 @@ class CourtListener:
             headers["Authorization"] = f"Token {token}"
         self.has_token = bool(token)
         self.http = httpx.Client(timeout=90, headers=headers, follow_redirects=True)
-        self.throttle = Throttle(1.0 if token else 4.0)
+        # Anonymous access is limited to 50 requests/hour; a free token allows 5,000/hour.
+        self.throttle = Throttle(1.0 if token else 75.0)
 
     def close(self) -> None:
         self.http.close()

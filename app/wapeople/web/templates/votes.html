@@ -28,7 +28,7 @@
   <div>
     <label for="v-f">Which votes</label>
     <select id="v-f" name="final">
-      <option value="1"{% if f.final == "1" %} selected{% endif %}>Final passage</option>
+      <option value="1"{% if f.final == "1" %} selected{% endif %}>Final votes</option>
       <option value="0"{% if f.final != "1" %} selected{% endif %}>All (incl. amendments)</option>
     </select>
   </div>
@@ -48,7 +48,7 @@
   <tr>
     <td class="nowrap">{{ rc.vote_date | date }}</td>
     <td class="desc"><a class="bill-id" href="{{ bill_url(rc.biennium, rc.bill_id) }}">{{ rc.bill_id }}</a> <span class="muted small">({{ rc.biennium | biennium }})</span><span class="sub">{{ rc.short_description }}</span></td>
-    <td data-label="Motion"><a href="/votes/{{ rc.id }}">{{ rc.agency }} · {{ rc.motion | motion }}</a></td>
+    <td data-label="Motion"><a href="/votes/{{ rc.id }}">{{ rc.agency }} · {{ rc.motion | motion(rc.vote_kind) }}</a></td>
     <td data-label="Result" style="min-width:160px"><strong>{{ rc.yeas }}–{{ rc.nays }}</strong> {{ result_badge(rc.result) }}{{ vote_bar(rc) }}</td>
   </tr>
   {% endfor %}

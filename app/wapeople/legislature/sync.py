@@ -15,9 +15,10 @@ from .client import LegClient, as_list
 from .parse import (
     TYPE_BY_PREFIX,
     TYPE_NAMES,
-    YEAS_NAYS_RE,
     biennium_years,
+    classify_vote,
     is_true,
+    matching_history_line,
     parse_date,
     roll_call_result,
     session_law,
@@ -270,6 +271,20 @@ def parse_roll_call(rc: dict) -> dict:
     }
 
 
+def dedupe_roll_calls(rolls: list[dict]) -> list[dict]:
+    """The service sometimes repeats a roll call (2003-04 Senate votes appear 3x), at times
+    under different motion text. Chamber + sequence number + date + tallies identify a
+    vote; keep the copy with the most informative motion."""
+    best: dict[tuple, dict] = {}
+    for rc in rolls:
+        key = (rc["agency"], rc["sequence_number"], rc["vote_date"],
+               rc["yeas"], rc["nays"], rc["absent"], rc["excused"])
+        prev = best.get(key)
+        if prev is None or (not (prev["motion"] or "").strip() and (rc["motion"] or "").strip()):
+            best[key] = rc
+    return list(best.values())
+
+
 # ---- The sync job -----------------------------------------------------------------
 
 class LegislatureSync:
@@ -403,12 +418,12 @@ class LegislatureSync:
         """
         rows = self.conn.execute(
             "SELECT b.bill_number, b.type_code,"
-            " bool_or(rc.agency = 'House' AND rc.motion ILIKE '%%final passage%%'"
+            " bool_or(rc.agency = 'House'"
             "   AND (rc.result = 'passed' OR (rc.result IS NULL AND rc.yeas >= 50))) AS house,"
-            " bool_or(rc.agency = 'Senate' AND rc.motion ILIKE '%%final passage%%'"
+            " bool_or(rc.agency = 'Senate'"
             "   AND (rc.result = 'passed' OR (rc.result IS NULL AND rc.yeas >= 25))) AS senate"
             " FROM roll_calls rc JOIN bills b ON b.id = rc.bill_pk"
-            " WHERE b.biennium = %s GROUP BY 1, 2",
+            " WHERE b.biennium = %s AND rc.vote_kind = 'final_passage' GROUP BY 1, 2",
             (biennium,),
         ).fetchall()
         return {
@@ -433,6 +448,10 @@ class LegislatureSync:
             " FROM bills WHERE biennium = %s", (biennium,)).fetchall():
             k = (b["bill_number"], b["type_code"])
             ph, ps, pl = k in passed["house"], k in passed["senate"], k in passed_legislature
+            # A bill can only be enacted or vetoed after passing both chambers; the vote
+            # records occasionally miss or mislabel one chamber's roll call.
+            if pl or b["vetoed"] or session_law(b["status_code"]):
+                ph = ps = True
             st = compute_stage(
                 type_code=b["type_code"], original_agency=b["original_agency"],
                 status_code=b["status_code"], veto=b["vetoed"], partial_veto=b["partial_veto"],
@@ -590,12 +609,14 @@ class LegislatureSync:
         sponsors: list[dict] = []
         if bill["type_code"] not in ("GA", "I"):
             sponsors = self.client.sponsors(biennium, bill["bill_id"])
+        # Always ask for roll calls: the history feed can't be used to skip this, because it
+        # is empty before 2001 and incomplete for some later bills (e.g. 2023-24 HB 2134 has
+        # 3 history lines but 4 recorded votes).
         rolls: list[dict] = []
-        if any(YEAS_NAYS_RE.search(text) for _, text in lines):
-            for rc in self.client.roll_calls(biennium, bill["bill_number"]):
-                parts = split_bill_id(rc.get("BillId", ""))
-                if parts and TYPE_BY_PREFIX[parts[0]] == bill["type_code"]:
-                    rolls.append(parse_roll_call(rc))
+        for rc in self.client.roll_calls(biennium, bill["bill_number"]):
+            parts = split_bill_id(rc.get("BillId", ""))
+            if parts and TYPE_BY_PREFIX[parts[0]] == bill["type_code"]:
+                rolls.append(parse_roll_call(rc))
         return sponsors, rolls
 
     def _write_details(self, bill: dict, sponsors: list[dict], rolls: list[dict], lines) -> int:
@@ -633,16 +654,18 @@ class LegislatureSync:
                     list(seen.values()),
                 )
             cur.execute("DELETE FROM roll_calls WHERE bill_pk = %s", (pk,))
-            for rc in rolls:
+            for rc in dedupe_roll_calls(rolls):
                 same_day = [text for d, text in lines if d == rc["vote_date"]]
+                line = matching_history_line(rc["yeas"], rc["nays"], same_day)
                 result = roll_call_result(rc["yeas"], rc["nays"], same_day)
+                kind = classify_vote(rc["motion"], line)
                 rid = cur.execute(
                     "INSERT INTO roll_calls (bill_pk, biennium, agency, version_id, motion, sequence_number,"
-                    " vote_date, yeas, nays, absent, excused, result)"
-                    " SELECT %s, biennium, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s FROM bills WHERE id = %s"
+                    " vote_date, yeas, nays, absent, excused, result, vote_kind, history_line)"
+                    " SELECT %s, biennium, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s FROM bills WHERE id = %s"
                     " RETURNING id",
                     (pk, rc["agency"], rc["version_id"], rc["motion"], rc["sequence_number"], rc["vote_date"],
-                     rc["yeas"], rc["nays"], rc["absent"], rc["excused"], result, pk),
+                     rc["yeas"], rc["nays"], rc["absent"], rc["excused"], result, kind, line, pk),
                 ).fetchone()["id"]
                 uniq = {mid: (rid, mid, name, vote) for mid, name, vote in rc["votes"]}
                 if uniq:

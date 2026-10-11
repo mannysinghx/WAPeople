@@ -7,6 +7,8 @@ from datetime import date
 
 import psycopg
 
+from ..legislature.parse import FINAL_VOTE_KINDS
+
 PAGE_SIZE = 25
 
 TYPE_FILTERS = {
@@ -358,7 +360,8 @@ def member_votes(
         where.append("v.vote = %(vote)s")
         params["vote"] = vote
     if final_only:
-        where.append("rc.motion ILIKE '%%final passage%%'")
+        where.append("rc.vote_kind = ANY(%(final_kinds)s)")
+        params["final_kinds"] = list(FINAL_VOTE_KINDS)
     if q:
         ref = parse_bill_ref(q)
         if ref:
@@ -373,7 +376,7 @@ def member_votes(
     params.update(limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE)
     items = c.execute(
         "SELECT v.vote, rc.id AS roll_call_id, rc.vote_date, rc.agency, rc.motion, rc.yeas, rc.nays,"
-        " rc.result, b.biennium, b.bill_id, b.short_description, b.stage_label"
+        " rc.result, rc.vote_kind, b.biennium, b.bill_id, b.short_description, b.stage_label"
         + frm + w + " ORDER BY rc.vote_date DESC, rc.id DESC LIMIT %(limit)s OFFSET %(offset)s",
         params,
     ).fetchall()
@@ -394,7 +397,8 @@ def list_roll_calls(
         where.append("rc.agency = %(chamber)s")
         params["chamber"] = chamber
     if final_only:
-        where.append("rc.motion ILIKE '%%final passage%%'")
+        where.append("rc.vote_kind = ANY(%(final_kinds)s)")
+        params["final_kinds"] = list(FINAL_VOTE_KINDS)
     if close:
         where.append("abs(rc.yeas - rc.nays) <= 6")
     if q:

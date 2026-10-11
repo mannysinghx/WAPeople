@@ -5,7 +5,7 @@
 {% macro roll_card(rc) %}
 <article class="card vote-card" id="vote-{{ rc.id }}">
   <div class="spread">
-    <h3 style="margin:0">{{ rc.agency }} · {{ rc.motion | motion }}</h3>
+    <h3 style="margin:0">{{ rc.agency }} · {{ rc.motion | motion(rc.vote_kind) }}</h3>
     <div class="row">{{ result_badge(rc.result) }} <span class="muted small">{{ rc.vote_date | date(True) }}</span></div>
   </div>
   {% if rc.version_id %}<div class="muted small">Version voted on: {{ rc.version_id }}</div>{% endif %}
@@ -105,6 +105,7 @@
       {% endfor %}
     </ol>
   </div>
+  {% elif bill.biennium < "2001" %}<p class="muted">The Legislature's online data doesn't include step-by-step history for sessions before 2001. Its final status is shown above, and the <a href="{{ leg_url(bill) }}" rel="noopener">official bill page</a> may have more.</p>
   {% else %}<p class="muted">No history recorded yet.</p>{% endif %}
 </section>
 

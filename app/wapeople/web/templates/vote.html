@@ -5,7 +5,7 @@
 <nav class="crumbs" aria-label="Breadcrumb"><a href="/votes">Votes</a> › <a href="{{ bill_url(rc.bill_biennium, rc.bill_id) }}">{{ rc.bill_id }} ({{ rc.bill_biennium | biennium }})</a> › {{ rc.vote_date | date }}</nav>
 <section class="card">
   <div class="id muted small" style="font-weight:800">{{ rc.agency | upper }} ROLL CALL{% if rc.sequence_number %} #{{ rc.sequence_number }}{% endif %} · {{ rc.vote_date | date(True) | upper }}</div>
-  <h1 style="margin:.25rem 0">{{ rc.motion | motion }}</h1>
+  <h1 style="margin:.25rem 0">{{ rc.motion | motion(rc.vote_kind) }}</h1>
   <p><a href="{{ bill_url(rc.bill_biennium, rc.bill_id) }}"><strong>{{ rc.bill_id }}</strong></a> — {{ rc.short_description }}{% if rc.version_id %} <span class="muted">(version {{ rc.version_id }})</span>{% endif %}</p>
   <div class="row">{{ result_badge(rc.result) }} <span class="muted small">Bill status today: {{ rc.stage_label }}</span></div>
   {{ vote_bar(rc) }}
