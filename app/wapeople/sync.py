@@ -16,6 +16,7 @@ import time
 from datetime import date, datetime
 
 from .config import SYNC_HOUR_LOCAL
+from .courts.client import RateLimited
 from .courts.sync import CourtSync
 from .db import connect
 from .legislature.sync import LegislatureSync, all_bienniums, window
@@ -57,11 +58,25 @@ def sync_upcoming() -> None:
 def sync_courts(since: str | None = None, texts: bool = True) -> None:
     with connect() as conn, tracked_run("courts", f"since {since or 'default'}") as stats:
         cs = CourtSync(conn)
-        stats.update(cs.collect(filed_after=since))
+        try:
+            # The default start date is the resumable backfill; a custom date is a one-off.
+            stats.update(cs.collect(filed_after=since, resume=since is None))
+        except RateLimited as e:
+            stats["rate_limited_hours"] = round(e.retry_after_s / 3600, 1)
         if texts:
             stats.update(cs.fetch_texts())
         stats.update(cs.extract_and_link())
         cs.cl.close()
+
+
+def court_backfill_due() -> bool:
+    """Court backfill unfinished and CourtListener isn't asking us to wait."""
+    with connect() as conn:
+        cs = CourtSync(conn)
+        if not cs.backfill_pending():
+            return False
+        retry = cs.retry_at()
+    return retry is None or retry <= datetime.now().astimezone()
 
 
 def link() -> None:
@@ -89,13 +104,8 @@ def initial() -> None:
     sync_legislature(recent, scope="initial (recent)")
     sync_upcoming()
     try:
-        with connect() as conn:
-            n_cases = conn.execute("SELECT count(*) AS n FROM court_cases").fetchone()["n"]
-        if n_cases == 0:
+        if court_backfill_due():
             sync_courts()
-        else:
-            with connect() as conn, tracked_run("courts", "texts") as stats:
-                stats.update(CourtSync(conn).fetch_texts())
     except Exception:
         # Court data is independent of bill history; don't let it block the backfill.
         log.exception("court sync failed during initial load; continuing with bill history")
@@ -148,6 +158,8 @@ def schedule() -> None:
         try:
             if incomplete_bienniums():
                 initial()
+            elif court_backfill_due():
+                sync_courts()
             now = datetime.now().astimezone()
             last = last_ok("courts:refresh")
             due = last is None or (now - last).total_seconds() > 20 * 3600

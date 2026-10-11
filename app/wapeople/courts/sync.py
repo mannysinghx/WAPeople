@@ -11,14 +11,14 @@ import html
 import logging
 import re
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import psycopg
 from psycopg.types.json import Jsonb
 
 from ..config import COURT_CASES_SINCE
 from ..legislature.parse import biennium_for_year
-from .client import CourtListener, PdfFetcher
+from .client import CourtListener, PdfFetcher, RateLimited
 from .refs import extract_mentions
 
 log = logging.getLogger(__name__)
@@ -146,31 +146,82 @@ class CourtSync:
         self.conn = conn
         self.cl = cl or CourtListener()
 
-    def collect(self, filed_after: str | None = None) -> dict:
-        """Run every category query and upsert the matching decisions."""
+    def collect(self, filed_after: str | None = None, resume: bool = True) -> dict:
+        """Run every category query, saving each page of matches as it arrives.
+
+        With resume=True (the full backfill) progress is checkpointed in court_sync_state,
+        so a run cut short by CourtListener's limits continues where it stopped. On a long
+        rate limit, progress and the retry time are saved and RateLimited is raised.
+        """
         filed_after = filed_after or COURT_CASES_SINCE
         stats: dict = {"filed_after": filed_after}
-        keys: set[str] = set()
         for cat, spec in CATEGORIES.items():
-            # Saved per category (the upsert merges categories), so an interrupted
-            # run keeps what it collected.
-            cases: dict[str, dict] = {}
+            url = None
+            if resume:
+                state = self.conn.execute(
+                    "SELECT next_url, completed_at FROM court_sync_state WHERE category = %s AND filed_after = %s",
+                    (cat, filed_after),
+                ).fetchone()
+                if state and state["completed_at"]:
+                    continue
+                if state is None:
+                    self.conn.execute(
+                        "INSERT INTO court_sync_state (category, filed_after, started_at) VALUES (%s, %s, now())",
+                        (cat, filed_after),
+                    )
+                url = state["next_url"] if state else None
+                self.conn.commit()
             n = 0
             t0 = time.time()
-            for i, r in enumerate(self.cl.search(spec["query"], filed_after=filed_after), 1):
-                if i % 200 == 0:
-                    log.info("court category %s: %d results read (%.0fs)", cat, i, time.time() - t0)
-                c = case_from_result(r, cat)
-                if not c:
-                    continue
-                n += 1
-                cases[c["case_key"]] = merge_case(cases[c["case_key"]], c) if c["case_key"] in cases else c
-            self._upsert(cases.values())
-            keys.update(cases)
+            while True:
+                try:
+                    results, nxt = self.cl.search_page(spec["query"], filed_after, url)
+                except RateLimited as e:
+                    self.conn.execute(
+                        "INSERT INTO court_rate_limit (id, retry_after) VALUES (1, now() + make_interval(secs => %s))"
+                        " ON CONFLICT (id) DO UPDATE SET retry_after = EXCLUDED.retry_after",
+                        (e.retry_after_s,),
+                    )
+                    self.conn.commit()
+                    log.warning("CourtListener rate limit: pausing court collection for %.1f hours (progress saved)",
+                                e.retry_after_s / 3600)
+                    raise
+                cases: dict[str, dict] = {}
+                for r in results:
+                    c = case_from_result(r, cat)
+                    if c:
+                        cases[c["case_key"]] = merge_case(cases[c["case_key"]], c) if c["case_key"] in cases else c
+                self._upsert(cases.values())
+                n += len(cases)
+                if resume:
+                    self.conn.execute(
+                        "UPDATE court_sync_state SET next_url = %s, pages = pages + 1, hits = hits + %s,"
+                        " completed_at = CASE WHEN %s::text IS NULL THEN now() END"
+                        " WHERE category = %s AND filed_after = %s",
+                        (nxt, len(cases), nxt, cat, filed_after),
+                    )
+                    self.conn.commit()
+                if not nxt:
+                    break
+                url = nxt
             stats[f"hits_{cat}"] = n
             log.info("court category %s: %d hits (%.0fs)", cat, n, time.time() - t0)
-        stats["cases"] = len(keys)
+        self.conn.execute("DELETE FROM court_rate_limit")
+        self.conn.commit()
         return stats
+
+    def backfill_pending(self) -> bool:
+        done = self.conn.execute(
+            "SELECT count(*) AS n FROM court_sync_state WHERE filed_after = %s AND completed_at IS NOT NULL",
+            (COURT_CASES_SINCE,),
+        ).fetchone()["n"]
+        self.conn.commit()
+        return done < len(CATEGORIES)
+
+    def retry_at(self):
+        row = self.conn.execute("SELECT retry_after FROM court_rate_limit WHERE id = 1").fetchone()
+        self.conn.commit()
+        return row["retry_after"] if row else None
 
     def _upsert(self, cases) -> None:
         rows = []
@@ -274,10 +325,22 @@ class CourtSync:
         return row["d"] if row else None
 
     def refresh(self) -> dict:
-        """Daily: re-query the last ~90 days of decisions, fetch new texts, relink."""
-        latest = self.latest_filed()
-        since = (latest - timedelta(days=90)).isoformat() if latest else None
-        stats = self.collect(filed_after=since)
+        """Daily: continue the backfill if it isn't finished, otherwise re-query the last
+        ~90 days of decisions; then fetch new texts and relink. A rate limit is not an
+        error here: progress is saved and the next run continues."""
+        stats: dict = {}
+        retry = self.retry_at()
+        try:
+            if retry and retry > datetime.now(timezone.utc):
+                stats["rate_limited_until"] = retry.isoformat()
+            elif self.backfill_pending():
+                stats.update(self.collect())
+            else:
+                latest = self.latest_filed()
+                since = (latest - timedelta(days=90)).isoformat() if latest else None
+                stats.update(self.collect(filed_after=since, resume=False))
+        except RateLimited as e:
+            stats["rate_limited_hours"] = round(e.retry_after_s / 3600, 1)
         stats.update(self.fetch_texts())
         stats.update(self.extract_and_link())
         return stats

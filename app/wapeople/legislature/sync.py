@@ -167,6 +167,9 @@ def build_bill(
     passed_house = key in passed["house"]
     passed_senate = key in passed["senate"]
     passed_leg = key in passed["legislature"]
+    law = session_law(cur["status"])
+    if passed_leg or cur["veto"] or law:  # same rule as recompute_stages
+        passed_house = passed_senate = True
     st = compute_stage(
         type_code=type_code,
         original_agency=cur["agency"] or first_value(ordered, "agency"),
@@ -180,7 +183,6 @@ def build_bill(
         action_lines=lines,
         biennium_status=bstatus,
     )
-    law = session_law(cur["status"])
     action_dates = [a[0] for a in actions if a[0]]
     last_action = max(action_dates + ([cur["status_date"]] if cur["status_date"] else []), default=None)
     version_ids = sorted({v["version_id"] for v in versions}, key=lambda s: (len(s.split()[0]), s))

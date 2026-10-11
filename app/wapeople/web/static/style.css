@@ -159,7 +159,7 @@ a.chip:hover { border-color: var(--accent-2); text-decoration: none; }
 .filters input[type=search], .filters input[type=text], .filters input[type=number], .filters select {
   width: 100%; font: inherit; font-size: .95rem; padding: .5rem .6rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text);
 }
-.filters .check { display: flex; gap: .4rem; align-items: center; font-size: .92rem; padding-bottom: .55rem; }
+.filters label.check { display: flex; gap: .4rem; align-items: center; font-size: .92rem; padding-bottom: .55rem; text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--text); margin: 0; }
 .filters .actions { display: flex; gap: .5rem; }
 .result-meta { color: var(--muted); font-size: .92rem; margin: 0 0 .75rem; }
 

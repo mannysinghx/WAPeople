@@ -30,8 +30,19 @@ class Throttle:
             self._last = time.monotonic()
 
 
+class RateLimited(Exception):
+    """CourtListener asked us to wait longer than we're willing to block for."""
+
+    def __init__(self, retry_after_s: float):
+        super().__init__(f"rate limited for {retry_after_s:.0f}s")
+        self.retry_after_s = retry_after_s
+
+
 class CourtListener:
-    """CourtListener REST v4. Anonymous use is allowed for search but heavily rate limited."""
+    """CourtListener REST v4. Anonymous use is allowed for search but heavily rate limited
+    (50 requests/hour plus a daily cap); a free token allows 5,000/hour."""
+
+    MAX_BLOCKING_WAIT = 900  # seconds; longer waits end the run so it can resume later
 
     def __init__(self, token: str | None = COURTLISTENER_TOKEN):
         headers = {"User-Agent": USER_AGENT}
@@ -39,7 +50,6 @@ class CourtListener:
             headers["Authorization"] = f"Token {token}"
         self.has_token = bool(token)
         self.http = httpx.Client(timeout=90, headers=headers, follow_redirects=True)
-        # Anonymous access is limited to 50 requests/hour; a free token allows 5,000/hour.
         self.throttle = Throttle(1.0 if token else 75.0)
 
     def close(self) -> None:
@@ -61,6 +71,8 @@ class CourtListener:
             if r.status_code in (429, 500, 502, 503, 504):
                 retry_after = r.headers.get("Retry-After", "")
                 wait = float(retry_after) if retry_after.isdigit() else backoff
+                if wait > self.MAX_BLOCKING_WAIT:
+                    raise RateLimited(wait)
                 log.info("CourtListener HTTP %s; waiting %.0fs", r.status_code, wait)
                 time.sleep(wait)
                 backoff = min(backoff * 2, 600)
@@ -68,23 +80,28 @@ class CourtListener:
             raise RuntimeError(f"CourtListener HTTP {r.status_code}: {r.text[:300]}")
         raise RuntimeError("CourtListener: too many retries")
 
+    def search_page(self, query: str, filed_after: str | None = None, url: str | None = None,
+                    court: str = "wash") -> tuple[list[dict], str | None]:
+        """One page of opinion-cluster hits (newest first) and the cursor URL of the next page.
+        Pass a previous page's cursor as `url` to resume."""
+        if url:
+            data = self.get_json(url)  # the cursor URL carries every parameter
+        else:
+            params = {"type": "o", "court": court, "q": query, "highlight": "on",
+                      "order_by": "dateFiled desc"}
+            if filed_after:
+                params["filed_after"] = filed_after
+            data = self.get_json(f"{COURTLISTENER_BASE}/search/", params)
+        return data.get("results", []), data.get("next")
+
     def search(self, query: str, court: str = "wash", filed_after: str | None = None) -> Iterator[dict]:
-        """All opinion-cluster hits for a query, newest first, following cursor pagination."""
-        params: dict | None = {
-            "type": "o",
-            "court": court,
-            "q": query,
-            "highlight": "on",
-            "order_by": "dateFiled desc",
-        }
-        if filed_after:
-            params["filed_after"] = filed_after
-        url: str | None = f"{COURTLISTENER_BASE}/search/"
-        while url:
-            data = self.get_json(url, params)
-            yield from data.get("results", [])
-            url = data.get("next")
-            params = None  # the "next" URL already carries every parameter
+        """All hits for a query, following cursor pagination."""
+        url: str | None = None
+        while True:
+            results, url = self.search_page(query, filed_after, url, court)
+            yield from results
+            if not url:
+                return
 
     def opinion_text(self, opinion_id: int) -> str | None:
         """Full opinion text (needs an API token)."""

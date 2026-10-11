@@ -387,9 +387,11 @@ def member_votes(
 
 def list_roll_calls(
     c: psycopg.Connection, *, biennium: str = "", chamber: str = "", final_only: bool = True,
-    q: str = "", close: bool = False, page: int = 1,
+    q: str = "", close: bool = False, bills_only: bool = False, page: int = 1,
 ) -> Page:
     where, params = ["TRUE"], {}
+    if bills_only:
+        where.append("b.type_code = 'B'")
     if biennium:
         where.append("rc.biennium = %(b)s")
         params["b"] = biennium

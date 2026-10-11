@@ -117,7 +117,7 @@ def home(request: Request):
         cur_row = next((b for b in bienniums if b["id"] == cur), None)
         upcoming = [b for b in bienniums if b["id"] > cur]
         recent_laws = Q.search_bills(c, stage="enacted", sort="recent", page_size=6).items
-        recent_votes = Q.list_roll_calls(c, final_only=True).items[:6]
+        recent_votes = Q.list_roll_calls(c, final_only=True, bills_only=True).items[:6]
         cases = Q.search_cases(c, page_size=4).items
         moving = Q.search_bills(c, bucket="ongoing", sort="recent", page_size=6).items
         proposed = Q.search_bills(c, bucket="proposed", sort="introduced", page_size=6).items
