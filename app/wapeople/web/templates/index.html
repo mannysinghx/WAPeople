@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import stage_badge, member_tag, result_badge, category_badges, vote_bar %}
+{% from "_macros.html" import stage_badge, member_tag, result_badge, category_badges, vote_bar, summary_line %}
 {% block title %}Washington State legislation, in plain view{% endblock %}
 {% block content %}
 <section class="hero">
@@ -63,7 +63,7 @@
     <div class="panel-head"><h2>Moving now</h2><a href="/bills?bucket=ongoing">All ongoing →</a></div>
     <ul class="list">
     {% for b in moving %}
-      <li><a class="title" href="{{ bill_url(b.biennium, b.bill_id) }}">{{ b.bill_id }}</a> {{ b.short_description }}
+      <li><a class="title" href="{{ bill_url(b.biennium, b.bill_id) }}">{{ b.bill_id }}</a> {{ b.short_description }}{{ summary_line(b, 170) }}
         <div class="meta">{{ stage_badge(b.stage) }} {{ b.stage_label }}</div></li>
     {% endfor %}
     </ul>
@@ -74,7 +74,7 @@
     <div class="panel-head"><h2>Newly proposed</h2><a href="/bills?bucket=proposed&sort=introduced">All proposed →</a></div>
     <ul class="list">
     {% for b in proposed %}
-      <li><a class="title" href="{{ bill_url(b.biennium, b.bill_id) }}">{{ b.bill_id }}</a> {{ b.short_description }}
+      <li><a class="title" href="{{ bill_url(b.biennium, b.bill_id) }}">{{ b.bill_id }}</a> {{ b.short_description }}{{ summary_line(b, 170) }}
         <div class="meta">{% if b.prime_name %}{{ member_tag(b.prime_name, b.prime_sponsor_id, b.prime_party, b.prime_district) }} · {% endif %}{{ b.introduced_date | date }}</div></li>
     {% endfor %}
     </ul>
@@ -84,7 +84,7 @@
     <div class="panel-head"><h2>Recently enacted</h2><a href="/bills?stage=enacted">All laws →</a></div>
     <ul class="list">
     {% for b in recent_laws %}
-      <li><a class="title" href="{{ bill_url(b.biennium, b.bill_id) }}">{{ b.bill_id }}</a> {{ b.short_description }}
+      <li><a class="title" href="{{ bill_url(b.biennium, b.bill_id) }}">{{ b.bill_id }}</a> {{ b.short_description }}{{ summary_line(b, 170) }}
         <div class="meta">{{ b.stage_label | replace("Enacted · ", "") }}{% if b.prime_name %} · {{ member_tag(b.prime_name, b.prime_sponsor_id, b.prime_party, b.prime_district) }}{% endif %}</div></li>
     {% endfor %}
     </ul>

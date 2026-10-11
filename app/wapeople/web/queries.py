@@ -121,7 +121,7 @@ def home_counts(c: psycopg.Connection, current: str | None) -> dict:
 
 BILL_LIST_COLS = (
     "b.id, b.biennium, b.bill_id, b.bill_number, b.type_code, b.current_version,"
-    " b.short_description, b.long_description, b.stage, b.stage_label, b.bucket,"
+    " b.short_description, b.long_description, b.summary, b.stage, b.stage_label, b.bucket,"
     " b.introduced_date, b.last_action_date, b.original_agency, b.prime_sponsor_id,"
     " m.name AS prime_name, mt.party AS prime_party, mt.district AS prime_district"
 )

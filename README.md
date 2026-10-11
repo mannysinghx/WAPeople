@@ -48,6 +48,9 @@ the first load take minutes and to get full opinion text for older cases that ha
   a bill has new activity.
 - Whether a bill passed the House or Senate comes from its recorded final-passage roll call
   (the service's "passed House/Senate" lists turned out to equal the "passed Legislature" list).
+- `app/wapeople/legislature/summaries.py`: plain-language summaries from the Legislature's
+  nonpartisan staff Bill Analyses/Reports ("Brief Summary of Bill"), choosing the report on the
+  bill's live version (version read from the document name; the service's BillId tag is unreliable).
 - `app/wapeople/courts/`: CourtListener search queries (one per policy category, see `CATEGORIES`),
   de-duplication of the archive's duplicate records, PDF text extraction, and bill linking.
   Bill links are made only when they're unambiguous (session-law chapter, or a bill number with a year).

@@ -5,6 +5,7 @@
   python -m wapeople.sync legislature --biennium 2025-26 [--force-details]
   python -m wapeople.sync legislature --all
   python -m wapeople.sync courts [--since 2020-01-01] [--no-text]
+  python -m wapeople.sync summaries --all    # staff bill summaries (also part of each legislature sync)
   python -m wapeople.sync link               # re-link court cases to bills
   python -m wapeople.sync schedule           # long-running: resume any incomplete load, then refresh daily
 """
@@ -19,6 +20,7 @@ from .config import SYNC_HOUR_LOCAL
 from .courts.client import RateLimited
 from .courts.sync import CourtSync
 from .db import connect
+from .legislature.summaries import SummarySync
 from .legislature.sync import LegislatureSync, all_bienniums, window
 from .migrate import migrate
 from .runs import tracked_run
@@ -27,20 +29,33 @@ log = logging.getLogger("wapeople.sync")
 
 
 def sync_legislature(bienniums: list[str], details: bool = True, force_details: bool = False,
-                     scope: str | None = None) -> None:
+                     scope: str | None = None, summaries: bool = True) -> None:
     """Sync the given bienniums (newest first), sharing one bulk download."""
     if not bienniums:
         return
     bienniums = sorted(set(bienniums), reverse=True)
     with connect() as conn:
         leg = LegislatureSync(conn)
+        sums = SummarySync(conn, leg.client)
         oldest = bienniums[-1]
         bulk = leg.load_bulk(window(oldest)[0])
         for b in bienniums:
             with tracked_run("legislature", scope or b) as stats:
                 stats.update(leg.sync_biennium(b, versions=bulk.get(b, []), details=details,
                                                force_details=force_details))
+                if summaries:
+                    stats.update(sums.sync(b))
+        sums.close()
         leg.client.close()
+
+
+def sync_summaries(bienniums: list[str], force: bool = False) -> None:
+    with connect() as conn:
+        sums = SummarySync(conn)
+        for b in sorted(set(bienniums), reverse=True):
+            with tracked_run("summaries", b) as stats:
+                stats.update(sums.sync(b, force=force))
+        sums.close()
 
 
 def sync_upcoming() -> None:
@@ -189,6 +204,10 @@ def main() -> None:
     lp.add_argument("--all", action="store_true")
     lp.add_argument("--no-details", action="store_true")
     lp.add_argument("--force-details", action="store_true")
+    sp = sub.add_parser("summaries")
+    sp.add_argument("--biennium", action="append", default=[])
+    sp.add_argument("--all", action="store_true")
+    sp.add_argument("--force", action="store_true")
     cp = sub.add_parser("courts")
     cp.add_argument("--since")
     cp.add_argument("--no-text", action="store_true")
@@ -211,6 +230,12 @@ def main() -> None:
         if not targets:
             p.error("give --biennium YYYY-YY (repeatable) or --all")
         sync_legislature(targets, details=not a.no_details, force_details=a.force_details)
+    elif a.cmd == "summaries":
+        migrate()
+        targets = all_bienniums() if a.all else a.biennium
+        if not targets:
+            p.error("give --biennium YYYY-YY (repeatable) or --all")
+        sync_summaries(targets, force=a.force)
     elif a.cmd == "courts":
         migrate()
         sync_courts(since=a.since, texts=not a.no_text)

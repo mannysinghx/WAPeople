@@ -42,6 +42,20 @@ def split_bill_id(bill_id: str) -> tuple[str, int] | None:
     return m["base"], int(m["num"])
 
 
+_MODS_RE = re.compile(r"^(?P<e>(?P<en>\d?)E)?(?P<s>(?P<sn>\d?)S)?$")
+
+
+def version_modifiers(bill_id: str) -> tuple[int, int]:
+    """'E2SHB 1110' -> (2, 1): (substitute number, engrossed number); (0, 0) if unknown."""
+    m = _BILL_ID_RE.match(" ".join((bill_id or "").split()))
+    mm = _MODS_RE.match(m["mods"]) if m else None
+    if not mm:
+        return (0, 0)
+    sub = int(mm["sn"] or 1) if mm["s"] else 0
+    eng = int(mm["en"] or 1) if mm["e"] else 0
+    return (sub, eng)
+
+
 def base_bill_id(bill_id: str) -> str | None:
     parts = split_bill_id(bill_id)
     return f"{parts[0]} {parts[1]}" if parts else None

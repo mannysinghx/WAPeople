@@ -262,3 +262,11 @@ details.voters summary { cursor: pointer; font-weight: 700; color: var(--link); 
 .prose { max-width: 48rem; }
 .prose h2 { margin-top: 2rem; }
 .prose code { font-family: var(--mono); font-size: .88em; background: var(--surface-2); padding: .1rem .3rem; border-radius: 4px; }
+
+/* Bill summaries */
+.list .sub, .sub.summary { display: block; color: var(--muted); font-size: .88rem; margin-top: .15rem; font-weight: 400; }
+.summary-box { background: var(--surface-2); border-left: 4px solid var(--accent-2); border-radius: 0 var(--radius) var(--radius) 0; padding: .85rem 1.1rem; margin: .5rem 0 1rem; }
+.summary-box h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 .4rem; }
+.summary-box ul { margin: 0 0 .5rem; padding-left: 1.2rem; }
+.summary-box li { margin: .25rem 0; }
+.summary-box p { margin: 0; }

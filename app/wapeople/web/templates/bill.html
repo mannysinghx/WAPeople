@@ -28,6 +28,13 @@
   <div class="id">{{ bill.type_name | upper }} · {{ bill.biennium | biennium }} SESSION{% if bill.current_version and bill.current_version != bill.bill_id %} · LATEST VERSION {{ bill.current_version }}{% endif %}</div>
   <h1 style="margin-top:.25rem">{{ bill.bill_id }}: {{ bill.short_description or "—" }}</h1>
   {% if bill.long_description %}<p class="lead" style="font-size:1.08rem">{{ bill.long_description }}</p>{% endif %}
+  {% if bill.summary %}
+  <section class="summary-box" aria-labelledby="summary-h">
+    <h2 id="summary-h">Summary</h2>
+    <ul>{% for item in bill.summary | bullets %}<li>{{ item }}</li>{% endfor %}</ul>
+    <p class="muted small">From the {{ bill.summary_source or "staff report" }}, written by the Legislature's nonpartisan staff.{% if bill.summary_url %} <a href="{{ bill.summary_url }}" rel="noopener">Read the full report ↗</a>{% endif %}</p>
+  </section>
+  {% endif %}
   <div class="row">{{ stage_badge(bill.stage) }} <span>{{ bill.stage_label }}</span></div>
 
   {% if steps %}

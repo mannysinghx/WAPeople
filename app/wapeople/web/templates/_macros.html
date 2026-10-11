@@ -1,3 +1,9 @@
+{% macro summary_line(b, length=230) -%}
+{%- if b.summary -%}<span class="sub summary">{{ b.summary | first_bullet | truncate(length) }}</span>
+{%- elif b.long_description and b.long_description != b.short_description -%}<span class="sub">{{ b.long_description | truncate(length) }}</span>
+{%- endif -%}
+{%- endmacro %}
+
 {% macro stage_badge(stage, label=None) -%}
 <span class="badge tone-{{ STAGE_TONE.get(stage, 'muted') }}">{{ label or STAGES.get(stage, (stage,))[0] }}</span>
 {%- endmacro %}
@@ -97,7 +103,7 @@
   {% for b in items %}
   <tr>
     <td class="bill-id"><a href="{{ bill_url(b.biennium, b.bill_id) }}">{{ b.bill_id }}</a>{% if show_session %}<div class="muted small">{{ b.biennium | biennium }}</div>{% endif %}</td>
-    <td class="desc">{{ b.short_description or "—" }}{% if b.long_description and b.long_description != b.short_description %}<span class="sub">{{ b.long_description | truncate(160) }}</span>{% endif %}</td>
+    <td class="desc"><strong>{{ b.short_description or "—" }}</strong>{{ summary_line(b) }}</td>
     <td data-label="Sponsor">{% if b.prime_name %}{{ member_tag(b.prime_name, b.prime_sponsor_id, b.prime_party, b.prime_district) }}{% else %}<span class="muted">—</span>{% endif %}</td>
     <td data-label="Status">{{ stage_badge(b.stage) }}<div class="small muted">{{ b.stage_label }}</div></td>
     <td data-label="Last action" class="nowrap">{{ b.last_action_date | date }}</td>

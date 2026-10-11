@@ -86,6 +86,8 @@ def qs(request: Request, **overrides) -> str:
 templates.env.filters["date"] = fmt_date
 templates.env.filters["biennium"] = biennium_label
 templates.env.filters["motion"] = motion_label
+templates.env.filters["first_bullet"] = lambda s: (s or "").split("\n", 1)[0]
+templates.env.filters["bullets"] = lambda s: [b for b in (s or "").split("\n") if b.strip()]
 templates.env.globals.update(
     bill_url=bill_url, qs=qs, leg_url=leg_url, PARTY_NAMES=PARTY_NAMES, STAGE_TONE=STAGE_TONE,
     STAGES=STAGES, CATEGORIES=CATEGORIES, TYPE_NAMES=TYPE_NAMES, TYPE_FILTERS=Q.TYPE_FILTERS,
