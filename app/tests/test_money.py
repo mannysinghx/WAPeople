@@ -327,3 +327,9 @@ def test_money_labels():
     assert range_label("10000") == "$10,000"
     assert range_label("Unknown") == "Unknown"
     assert range_label(None) == "—"
+
+
+def test_every_alias_points_at_a_name_that_is_its_own_key():
+    # Otherwise a committee's donors and its registered filing would land on different pages.
+    for target in C.ORG_ALIASES.values():
+        assert C.org_key(target) == target

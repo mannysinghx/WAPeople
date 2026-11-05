@@ -80,7 +80,7 @@ Washington Public Disclosure Commission's open data on data.wa.gov (no key neede
   `data/money_officials.json`. **Update that file when officeholders change** (next: January 2027).
 - **Sync:** `python -m wapeople.sync money` runs in the daily job. It compares each campaign's row count and
   total with the PDC's own and reloads only campaigns that differ (`--full` reloads everything). A first load
-  takes about 8 minutes and adds about 400 MB. Results are in `sync_runs`; `mismatched` should be 0.
+  takes 8 to 16 minutes and adds about 420 MB. Results are in `sync_runs`; `mismatched` should be 0.
 - **Privacy:** the sync's `select` lists never name address, phone or email columns, so those never leave the
   source. `money/disclosure.py` is a whitelist that drops home addresses, family names and anything only about
   a dependent from financial statements. Itemized donor pages are `noindex` and blocked in `robots.txt`.

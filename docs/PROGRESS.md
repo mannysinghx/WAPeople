@@ -23,8 +23,10 @@ Each item was checked against the live site, production logs, or the PDC's own t
 | Duplicate site at the Railway address, `SITE_URL` pointing there | Live values checked; redirect added, env change is part of the deploy |
 | `/legislators` showed 151 members for 147 seats with no explanation | Members who left during the term are now labeled |
 | Home page said "so far" after final adjournment | Wording follows session status |
+| `pypdf` 6.20.0 had 16 known vulnerabilities | `pip-audit` in `scripts/ci-local.sh`; upgraded to 6.21.4, audit now clean |
+| Street addresses typed into city, employer and description fields | Dev load: 113 city rows and 5 employer rows matched before; all free-text fields scan at 0 after, except business names such as `515 Park Place LLC` |
 
-Tests: `TEST_DATABASE_URL=... python -m pytest tests` and `scripts/ci-local.sh` (results are in `docs/OPS_LOG.md`).
+Tests: `scripts/ci-local.sh` passed on the tip of this branch on 2026-11-05: 190 tests, none skipped, no known vulnerabilities. Run it again on the exact commit before pushing.
 
 ## In flight
 
@@ -48,7 +50,7 @@ Known limits, stated on the site: PDC candidate records begin with the 2009–10
 1. Owner approves the push.
 2. Set `SITE_URL=https://wapeople.org` on `WAPeople` and `sync` (Railway, no deploy of its own).
 3. Run `scripts/ci-local.sh` on the exact commit, then push to `main`. Railway redeploys `WAPeople` and `sync` (both watch `/app/**`). The web service applies migration 006 at startup (new tables only).
-4. Run the first money load: run the `sync` service now or wait for the 12:00 UTC cron. About 8 minutes; `/money` says "loading" until then.
+4. Run the first money load: run the `sync` service now or wait for the 12:00 UTC cron. 8 to 16 minutes, about 420 MB more in Postgres; `/money` says "loading" until then.
 5. Verify live: `/money`, `/money/18264`, `/legislators/15814` shows Ann Rivers, `curl -I https://wapeople.org/` is 200, the `sync_runs` row for `money` has `mismatched: 0`.
 6. January 2027: update `app/wapeople/data/money_officials.json` for officeholders taking office after the November 3, 2026 election.
 

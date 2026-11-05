@@ -333,3 +333,21 @@ def test_a_person_gets_no_street_address_but_a_business_keeps_its_name(client):
     business = _contribution({**base, "code": "Business", "contributor_category": "Organization",
                               "contributor_name": "515 Park Place LLC"}, 100)
     assert "515 Park Place LLC" in business
+
+
+def test_shorthand_committee_names_show_their_full_name(client):
+    from wapeople.money.sync import MoneySync
+
+    c = client.conn
+    c.execute("INSERT INTO money_contributions (id, person_pk, committee_id, election_year, amount, source_type, is_org,"
+              " contributor_name, contributor_key) VALUES (777001, 100, 9001, 2024, 10, 'Legislative caucuses', true,"
+              " 'HOUSE DEMO CAMP COMM', 'HOUSE DEMOCRATIC CAMPAIGN COMMITTEE')")
+    c.commit()
+    MoneySync(c, FakePDC()).rebuild_rollups()
+    name = c.execute("SELECT name FROM money_orgs WHERE key = 'HOUSE DEMOCRATIC CAMPAIGN COMMITTEE'").fetchone()["name"]
+    assert name == "HOUSE DEMOCRATIC CAMPAIGN COMMITTEE"
+    rollup = c.execute("SELECT rollup FROM money_people WHERE id = 100").fetchone()["rollup"]
+    assert any(o["name"] == "HOUSE DEMOCRATIC CAMPAIGN COMMITTEE" for o in rollup["top_orgs"])
+    c.execute("DELETE FROM money_contributions WHERE id = 777001")
+    c.commit()
+    MoneySync(c, FakePDC()).rebuild_rollups()

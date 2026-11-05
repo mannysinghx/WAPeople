@@ -596,6 +596,10 @@ class MoneySync:
             " row_number() OVER (PARTITION BY person_pk ORDER BY sum(amount) DESC) AS rn"
             " FROM money_expenditures WHERE recipient_name IS NOT NULL GROUP BY person_pk, upper(recipient_name)) t"
             " WHERE rn <= 15 ORDER BY 1, 3 DESC"))
+        for person in roll.values():
+            for org in person.get("top_orgs", []):
+                if org["key"] in C.ORG_DISPLAY_NAMES:
+                    org["name"] = org["key"]
         rows = c.execute(
             "WITH item AS ("
             "  SELECT person_pk, sum(amount) AS total, count(*) AS n,"
@@ -645,6 +649,7 @@ class MoneySync:
                 " FROM money_contributions WHERE is_org AND contributor_key <> '' GROUP BY 1"
             )
             orgs = cur.rowcount
+            cur.execute("UPDATE money_orgs SET name = key WHERE key = ANY(%s)", (list(C.ORG_DISPLAY_NAMES),))
         c.commit()
         return {"rollups": len(updates), "organizations": orgs}
 
