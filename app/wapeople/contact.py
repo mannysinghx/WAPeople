@@ -34,6 +34,20 @@ TOKEN_MAX_AGE = 24 * 3600
 PER_CLIENT_PER_HOUR = 5
 SITE_WIDE_PER_DAY = 200
 MAX_ATTEMPTS = 5
+# Link markup and search-engine sales pitches. Matching messages are kept but not emailed
+# (see /privacy), so the inbox only gets messages from people. Deliberately no language
+# filter: Washingtonians write to us in many languages.
+_SPAM_RE = re.compile(
+    r"<a\s+href=|\[url[=\]]"
+    r"|google'?s search index"
+    r"|\bai seo\b"
+    r"|\bseo\b[^.]{0,120}\b(rank|visib|quote|price)"
+    r"|\b(rank|visib|quote|price)[^.]{0,120}\bseo\b"
+    r"|search engine optimi[sz]ation"
+    r"|rank higher on google"
+    r"|not showing up in [^.]{0,60}search results",
+    re.I,
+)
 # Privacy policy commitments (see /privacy): messages are deleted after RETENTION_DAYS, and the
 # keyed IP hash used for rate limiting is cleared after CLIENT_HASH_DAYS.
 RETENTION_DAYS = config.CONTACT_RETENTION_DAYS
@@ -114,7 +128,14 @@ def save(conn: psycopg.Connection, clean: dict, chash: str) -> int:
     ).fetchone()["id"]
 
 
+def looks_like_spam(message: str) -> bool:
+    return bool(_SPAM_RE.search(message or ""))
+
+
 def email_configured() -> bool:
+    # A login without its password can only fail, so it isn't configured yet.
+    if config.SMTP_USER and not config.SMTP_PASSWORD:
+        return False
     return bool(config.CONTACT_TO and config.SMTP_HOST and config.SMTP_FROM)
 
 
@@ -164,15 +185,22 @@ def _send(email: EmailMessage) -> None:
 def send_pending(conn: psycopg.Connection, limit: int = 20) -> dict:
     """Email stored messages that haven't been delivered yet."""
     if not email_configured():
+        log.warning("contact email is not configured (CONTACT_TO, SMTP_HOST, SMTP_USER, SMTP_PASSWORD); "
+                    "messages stay in the database")
         return {"contact_sent": 0, "contact_note": "email not configured"}
     rows = conn.execute(
-        "SELECT * FROM contact_messages WHERE email_status <> 'sent' AND attempts < %s"
+        "SELECT * FROM contact_messages WHERE email_status IN ('pending', 'failed') AND attempts < %s"
         " ORDER BY created_at LIMIT %s",
         (MAX_ATTEMPTS, limit),
     ).fetchall()
     conn.commit()
-    sent = failed = 0
+    sent = failed = held = 0
     for r in rows:
+        if looks_like_spam(r["message"]):
+            held += 1
+            conn.execute("UPDATE contact_messages SET email_status = 'spam' WHERE id = %s", (r["id"],))
+            conn.commit()
+            continue
         try:
             _send(build_email(r))
         except Exception as e:  # keep it for the next retry; record only the error type
@@ -191,7 +219,7 @@ def send_pending(conn: psycopg.Connection, limit: int = 20) -> dict:
                 (r["id"],),
             )
         conn.commit()
-    return {"contact_sent": sent, "contact_failed": failed}
+    return {"contact_sent": sent, "contact_failed": failed, **({"contact_spam_held": held} if held else {})}
 
 
 def apply_retention(conn: psycopg.Connection) -> dict:

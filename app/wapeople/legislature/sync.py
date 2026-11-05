@@ -33,6 +33,15 @@ Key = tuple[int, str]  # (bill_number, type_code)
 
 # ---- Biennium helpers ------------------------------------------------------------
 
+# The roster service lists members who have left with a blank name and no party or district,
+# for example LongName 'Senator '. Those rows carry no information.
+PLACEHOLDER_NAMES = ("Senator", "Representative", "")
+
+
+def is_placeholder_member(m: dict) -> bool:
+    return not (m.get("Name") or "").strip() and not (m.get("LastName") or "").strip()
+
+
 def all_bienniums(today: date | None = None) -> list[str]:
     today = today or date.today()
     last_start = today.year if today.year % 2 == 1 else today.year - 1
@@ -488,7 +497,7 @@ class LegislatureSync:
         rows, terms = [], []
         for m in members:
             mid = (m.get("Id") or "").strip()
-            if not mid.isdigit():
+            if not mid.isdigit() or is_placeholder_member(m):
                 continue
             rows.append((
                 int(mid), m.get("Name") or m.get("LongName") or mid, m.get("FirstName") or None,
@@ -517,6 +526,45 @@ class LegislatureSync:
                 " long_name = EXCLUDED.long_name, acronym = EXCLUDED.acronym",
                 terms,
             )
+
+    def repair_members(self) -> dict:
+        """Undo placeholder roster rows: drop their empty terms and restore each member's real
+        name from the newest roster that still has it. Cheap when there's nothing to repair."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM member_terms WHERE district IS NULL AND party IS NULL"
+                " AND btrim(coalesce(long_name, '')) = ANY(%s)", (list(PLACEHOLDER_NAMES),))
+            terms_removed = cur.rowcount
+        broken = [r["id"] for r in self.conn.execute(
+            "SELECT id FROM members WHERE btrim(name) = ANY(%s)", (list(PLACEHOLDER_NAMES),))]
+        rosters: dict[str, dict[int, dict]] = {}
+        restored = 0
+        for mid in broken:
+            terms = self.conn.execute(
+                "SELECT biennium FROM member_terms WHERE member_id = %s ORDER BY biennium DESC", (mid,)
+            ).fetchall()
+            for t in terms:
+                b = t["biennium"]
+                if b not in rosters:
+                    rosters[b] = {int(m["Id"]): m for m in self.client.members(b)
+                                  if (m.get("Id") or "").strip().isdigit() and not is_placeholder_member(m)}
+                m = rosters[b].get(mid)
+                if m:
+                    self.conn.execute(
+                        "UPDATE members SET name = %s, first_name = %s, last_name = %s, agency = %s,"
+                        " party = %s, district = %s, email = %s, phone = %s, latest_biennium = %s,"
+                        " updated_at = now() WHERE id = %s",
+                        (m.get("Name"), m.get("FirstName") or None, m.get("LastName") or None,
+                         m.get("Agency") or None, m.get("Party") or None, m.get("District") or None,
+                         m.get("Email") or None, m.get("Phone") or None, b, mid),
+                    )
+                    restored += 1
+                    break
+        self.conn.commit()
+        if broken:
+            log.info("restored %d of %d legislator names from older rosters", restored, len(broken))
+        return {"member_terms_removed": terms_removed, "member_names_restored": restored,
+                "member_names_unresolved": len(broken) - restored}
 
     def _fetch_missing(self, biennium: str, missing: list[Key]) -> list[dict]:
         out: list[dict] = []

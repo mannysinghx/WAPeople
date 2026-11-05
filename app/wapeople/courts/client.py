@@ -38,9 +38,13 @@ class RateLimited(Exception):
         self.retry_after_s = retry_after_s
 
 
+class AuthRequired(Exception):
+    """CourtListener refused the request because it has no valid API token."""
+
+
 class CourtListener:
-    """CourtListener REST v4. Anonymous use is allowed for search but heavily rate limited
-    (50 requests/hour plus a daily cap); a free token allows 5,000/hour."""
+    """CourtListener REST v4. The search API has required a token since late October 2026
+    (it answers 401 without one); a free account allows 5,000 requests/hour."""
 
     MAX_BLOCKING_WAIT = 900  # seconds; longer waits end the run so it can resume later
 
@@ -77,6 +81,11 @@ class CourtListener:
                 time.sleep(wait)
                 backoff = min(backoff * 2, 600)
                 continue
+            if r.status_code in (401, 403):
+                raise AuthRequired(
+                    f"CourtListener answered HTTP {r.status_code}: set COURTLISTENER_API_TOKEN "
+                    "(free account at courtlistener.com) to collect new court decisions."
+                )
             raise RuntimeError(f"CourtListener HTTP {r.status_code}: {r.text[:300]}")
         raise RuntimeError("CourtListener: too many retries")
 
