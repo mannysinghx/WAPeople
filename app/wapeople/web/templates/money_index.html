@@ -6,7 +6,7 @@
 {% block content %}
 <section class="hero" style="padding-top:.5rem">
   <h1>Money trails</h1>
-  <p class="lead">Who funds Washington's elected officials, how much they gave, where it came from, and where the money went next. Every figure comes from reports filed with the state's Public Disclosure Commission, and every record links to the report it came from.</p>
+  <p class="lead">Who funds Washington's elected officials, how much they gave, where it came from, and where the money went next. State figures come from reports filed with the Public Disclosure Commission (PDC), and figures for members of Congress from the Federal Election Commission (FEC). The two are labeled, and every record links to its source.</p>
 </section>
 
 {% if not stats.with_records %}
@@ -14,7 +14,8 @@
 {% else %}
 <section class="stats" aria-label="Totals">
   <div class="stat"><div class="n">{{ stats.current_people }}</div><div class="l">Elected officials in office</div></div>
-  <div class="stat"><div class="n">{{ stats.current_raised | usd_short }}</div><div class="l">They've raised, in all campaigns on record</div></div>
+  <div class="stat"><div class="n">{{ stats.current_raised | usd_short }}</div><div class="l">Raised in state campaigns on record (PDC)</div></div>
+  {% if stats.current_fed_raised %}<div class="stat"><div class="n">{{ stats.current_fed_raised | usd_short }}</div><div class="l">Raised in federal campaigns on record (FEC)</div></div>{% endif %}
   <div class="stat"><div class="n">{{ "{:,}".format(stats.contributions) }}</div><div class="l">Itemized contributions</div></div>
   <div class="stat"><a class="card-link" href="/money/organizations"><div class="n">{{ "{:,}".format(stats.orgs) }}</div><div class="l">Organizations that gave →</div></a></div>
 </section>
@@ -68,10 +69,15 @@
   <tr>
     <td><a href="/money/{{ m.id }}"><strong>{{ m.name }}</strong></a>{% if m.party in ("D", "R") %} <span class="small">{{ party(m.party) }}</span>{% endif %}</td>
     <td data-label="Office">{{ m.title }}</td>
-    <td data-label="Raised" class="num">{% if m.n_campaigns %}{{ m.total_raised | usd }}{% else %}<span class="muted">No records</span>{% endif %}</td>
-    <td data-label="Latest" class="num">{% if m.latest_raised is not none %}{{ m.latest_raised | usd }} <span class="muted small">({{ m.latest_year }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
-    <td data-label="From Washington" class="num">{% if m.in_state + m.out_of_state > 0 %}{{ (100 * m.in_state / (m.in_state + m.out_of_state)) | round | int }}%{% else %}<span class="muted">—</span>{% endif %}</td>
-    <td data-label="Largest source">{{ m.top_source or "—" }}</td>
+    <td data-label="Raised" class="num">
+      {% if m.fed_cycles %}{{ m.fed_raised | usd }} <span class="muted small">FEC</span>{% if m.n_campaigns %}<div class="small muted">{{ m.total_raised | usd }} PDC</div>{% endif %}
+      {% elif m.fec_candidate_ids %}<span class="muted">Loading</span>
+      {% elif m.n_campaigns %}{{ m.total_raised | usd }}{% else %}<span class="muted">No records</span>{% endif %}
+    </td>
+    <td data-label="Latest" class="num">{% if m.fed_latest_raised is not none %}{{ m.fed_latest_raised | usd }} <span class="muted small">({{ m.fed_last_cycle }})</span>{% elif m.latest_raised is not none %}{{ m.latest_raised | usd }} <span class="muted small">({{ m.latest_year }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    {% set wa = m.fed_in_state if m.fed_cycles else m.in_state %}{% set away = m.fed_out_of_state if m.fed_cycles else m.out_of_state %}
+    <td data-label="From Washington" class="num">{% if wa + away > 0 %}{{ (100 * wa / (wa + away)) | round | int }}%{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td data-label="Largest source">{{ m.fed_top_source or m.top_source or "—" }}</td>
   </tr>
   {% endfor %}
   </tbody>
@@ -80,7 +86,7 @@
 {% else %}
 <div class="card empty"><h2>No one matches</h2><p>Try another name or clear the filters.</p></div>
 {% endif %}
-<p class="muted small" style="margin-top:1rem">"Raised" adds up every campaign in the PDC's electronic records, which begin with the 2009–10 cycle, for any Washington office the person ran for. Money a candidate moves from one campaign to the next is reported again by the new campaign, so it can count more than once. "From Washington" is the share of contributions with a stated location; small unitemized gifts have none.</p>
+<p class="muted small" style="margin-top:1rem">"Raised" adds up every campaign on record. State figures (PDC) begin with the 2009–10 cycle and cover any Washington office the person ran for. Federal figures (FEC) cover each two-year cycle back to 1992. They're never added together. Money a candidate moves from one campaign to the next is reported again by the new campaign, so it can count more than once. "From Washington" is the share of itemized gifts with a stated location; small gifts have none.</p>
 {% endif %}
 {{ source_note() }}
 {% endblock %}

@@ -50,13 +50,15 @@
       Data: <a href="https://wslwebservices.leg.wa.gov/">Washington State Legislature web services</a> ·
       <a href="https://www.courtlistener.com/">CourtListener</a> (Free Law Project) ·
       <a href="https://www.courts.wa.gov/opinions/">Washington Courts</a> ·
-      <a href="https://www.pdc.wa.gov/">Public Disclosure Commission</a>.
+      <a href="https://www.pdc.wa.gov/">Public Disclosure Commission</a> ·
+      <a href="https://www.fec.gov/data/browse-data/?tab=bulk-data">Federal Election Commission</a>.
       <a href="/disclaimer">Not an official government site</a>. Always confirm with the official source.
     </div>
     <div>
       {% if updated.get("legislature") %}Bills updated {{ updated["legislature"] | date }}{% endif %}
       {% if updated.get("courts") %} · Cases updated {{ updated["courts"] | date }}{% endif %}
-      {% if updated.get("money") %} · Money updated {{ updated["money"] | date }}{% endif %}
+      {% if updated.get("money") %} · State money updated {{ updated["money"] | date }}{% endif %}
+      {% if updated.get("fec") %} · Federal money updated {{ updated["fec"] | date }}{% endif %}
       · <a href="/about">About us</a> · <a href="/contact">Contact us</a>
       <br><a href="/disclaimer">Disclaimer</a> · <a href="/privacy">Privacy policy</a> · <a href="/terms">Terms of use</a>
     </div>

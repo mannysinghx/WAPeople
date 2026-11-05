@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% from "_macros.html" import party, pager %}
+{% from "_money.html" import hbars, fec_note with context %}
+{% block title %}{{ p.name }}: federal money trail{% endblock %}
+{% block description %}{{ p.name }} ({{ p.title }}): {{ p.fed_raised | usd }} raised in federal campaigns, according to the Federal Election Commission. Who gave, where it came from, and where it went.{% endblock %}
+{% block robots %}{% if noindex %}<meta name="robots" content="noindex">{% endif %}{% endblock %}
+{% block content %}
+{% set roll = p.fed_rollup or {} %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/money">Money trails</a> › {{ p.name }}</nav>
+<section class="card">
+  <div class="member-head">
+    <div class="avatar{% if p.party in ('D','R') %} party-{{ p.party }}{% endif %}" aria-hidden="true">{{ p.name[:1] }}{{ p.name.split(' ')[-1][:1] }}</div>
+    <div>
+      <h1 style="margin:0">{{ p.name }}</h1>
+      <div class="muted">{{ p.title }}{% if p.party in ("D", "R") %} · {{ party(p.party, True) }}{% endif %}{% if p.fed_first_cycle %} · FEC records {{ p.fed_first_cycle }}{% if p.fed_last_cycle != p.fed_first_cycle %}–{{ p.fed_last_cycle }}{% endif %}{% endif %}</div>
+      <div class="small" style="margin-top:.25rem">
+        {% if p.member_id %}<a href="/legislators/{{ p.member_id }}">State Legislature voting record</a> · {% endif %}
+        <a href="{{ p.source_url }}" rel="noopener">Official page ↗</a>
+        {% for cid in p.fec_candidate_ids %} · <a href="https://www.fec.gov/data/candidate/{{ cid }}/" rel="noopener">FEC record{% if p.fec_candidate_ids | length > 1 %} ({{ "Senate" if cid[0] == "S" else "House" }}){% endif %} ↗</a>{% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+
+{% if p.n_campaigns %}
+<nav class="tabs" aria-label="Source of records">
+  <a href="/money/{{ p.id }}" aria-current="page">Federal campaigns <span class="count">FEC</span></a>
+  <a href="/money/{{ p.id }}?source=state">Earlier state campaigns <span class="count">{{ p.total_raised | usd_short }}, PDC</span></a>
+</nav>
+{% endif %}
+
+{% if not p.fed_cycles %}
+<div class="card empty" style="margin-top:1rem"><h2>Federal records are loading</h2><p>This page fills in after the next data refresh.</p></div>
+{% else %}
+<section class="trail" aria-label="The money trail in brief">
+  <div class="trail-step"><div class="n">{{ p.fed_raised | usd_short }}</div><div class="l">Raised (FEC total)</div></div>
+  <div class="trail-arrow" aria-hidden="true">→</div>
+  <div class="trail-step"><div class="n">{{ p.fed_spent | usd_short }}</div><div class="l">Spent (FEC total)</div></div>
+  <div class="trail-arrow" aria-hidden="true">→</div>
+  <div class="trail-step"><div class="n">{{ p.fed_cash_on_hand | usd_short }}</div><div class="l">Cash on hand, latest report</div></div>
+  <div class="trail-step trail-side"><div class="n">{% if p.fed_in_state + p.fed_out_of_state > 0 %}{{ (100 * p.fed_in_state / (p.fed_in_state + p.fed_out_of_state)) | round | int }}%{% else %}—{% endif %}</div><div class="l">Of itemized individual gifts from Washington</div></div>
+</section>
+
+<nav class="tabs" aria-label="Money records">
+  {% set tab_n = {"contributions": counts.contributions, "spending": counts.spending, "outside": counts.outside} %}
+  {% for k, label in VIEWS.items() %}
+  <a href="?view={{ k }}"{% if view == k %} aria-current="page"{% endif %}>{{ label }}{% if tab_n.get(k) %} <span class="count">{{ "{:,}".format(tab_n[k]) }}</span>{% endif %}</a>
+  {% endfor %}
+</nav>
+
+{% if view == "overview" %}
+<div class="grid-2">
+  <section class="card">
+    <h2>Where the money came from</h2>
+    {{ hbars(roll.by_source or [], "type", 1) }}
+    <p class="small muted" style="margin:.75rem 0 0">These add up to the FEC's reported total. Small gifts are what's left of individuals' money after the itemized gifts: campaigns don't have to name donors of $200 or less. <a href="?view=contributions">See itemized contributions →</a></p>
+  </section>
+  <section class="card">
+    <h2>Where the money went</h2>
+    {% if roll.by_spend %}{{ hbars(roll.by_spend, "category", 2) }}{% else %}<p class="muted">No itemized spending on record.</p>{% endif %}
+    <p class="small muted" style="margin:.75rem 0 0">From itemized reports, grouped by the purpose the campaign stated. <a href="?view=spending">See every expense →</a></p>
+  </section>
+</div>
+
+<section style="margin-top:1rem">
+  <h2>By two-year cycle</h2>
+  <div class="table-wrap">
+  <table class="rtable">
+    <thead><tr><th scope="col">Cycle</th><th scope="col">Race</th><th scope="col" class="num">Raised</th><th scope="col" class="num">From individuals</th><th scope="col" class="num">From PACs</th><th scope="col" class="num">Spent</th><th scope="col" class="num">Cash at end</th><th scope="col" class="num">Debts</th><th scope="col">Filing</th></tr></thead>
+    <tbody>
+    {% for k in cycles %}
+    <tr>
+      <td><a href="?view=contributions&amp;cycle={{ k.cycle }}" rel="nofollow"><strong>{{ k.cycle }}</strong></a></td>
+      <td data-label="Race">{{ "U.S. Senate" if k.office == "S" else "U.S. House" }}{% if k.office == "H" and k.district %}, WA-{{ k.district }}{% endif %}{% if k.coverage_end %}<div class="small muted">Through {{ k.coverage_end | date }}</div>{% endif %}</td>
+      <td data-label="Raised" class="num">{{ k.receipts | usd }}</td>
+      <td data-label="From individuals" class="num">{{ k.from_individuals | usd_blank }}</td>
+      <td data-label="From PACs" class="num">{{ k.from_pacs | usd_blank }}</td>
+      <td data-label="Spent" class="num">{{ k.disbursements | usd }}</td>
+      <td data-label="Cash at end" class="num">{{ k.cash_end | usd_blank }}</td>
+      <td data-label="Debts" class="num">{{ k.debts | usd_blank }}</td>
+      <td data-label="Filing"><a href="https://www.fec.gov/data/candidate/{{ k.candidate_id }}/?cycle={{ k.cycle }}" rel="noopener nofollow">FEC ↗</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<div class="grid-2" style="margin-top:1rem">
+  <section class="card">
+    <h2>Top committees that gave</h2>
+    {% if roll.top_committees %}{{ hbars(roll.top_committees, "name", 1, limit=15, link=fec_committee_link) }}{% else %}<p class="muted">None on record.</p>{% endif %}
+    <p class="small muted" style="margin:.75rem 0 0">Each links to the committee's FEC page, which shows who funds it. Individual donors are listed under <a href="?view=contributions">Contributions</a>.</p>
+  </section>
+  <section class="card">
+    <h2>Kinds of committees</h2>
+    {% if roll.by_giver_type %}{{ hbars(roll.by_giver_type, "type", 1) }}{% else %}<p class="muted">None on record.</p>{% endif %}
+    <p class="small muted" style="margin:.75rem 0 0">Using the FEC's own classification of each committee, from reports filed by the committees that gave.</p>
+  </section>
+</div>
+
+<div class="grid-2" style="margin-top:1rem">
+  <section class="card">
+    <h2>Where itemized donors are</h2>
+    {% if roll.by_city %}<h3>Top cities</h3>{{ hbars(roll.by_city, "city", 1, limit=10) }}{% endif %}
+    {% if roll.by_state %}<h3 style="margin-top:1rem">Outside Washington</h3>{{ hbars(roll.by_state, "state", 1, limit=8) }}{% endif %}
+    {% if not roll.by_city %}<p class="muted">None on record.</p>{% endif %}
+  </section>
+  <section class="card">
+    <h2>Donors' employers</h2>
+    {% if roll.top_employers %}{{ hbars(roll.top_employers, "employer", 1, limit=12) }}{% else %}<p class="muted">None on record.</p>{% endif %}
+    <p class="small muted" style="margin:.75rem 0 0">Where individual donors work. Companies can't give directly to federal campaigns, and the employer didn't give this money.</p>
+  </section>
+</div>
+
+<div class="grid-2" style="margin-top:1rem">
+  <section class="card">
+    <h2>Who the campaigns paid</h2>
+    {% if roll.top_payees %}{{ hbars(roll.top_payees, "name", 2, limit=12) }}{% else %}<p class="muted">None on record.</p>{% endif %}
+  </section>
+  <section class="card">
+    <h2>Other committees linked to {{ p.name }}</h2>
+    {% if other_committees %}
+    {% macro committee_item(x) %}<li><a class="title" href="https://www.fec.gov/data/committee/{{ x.committee_id }}/" rel="noopener">{{ x.name or x.committee_id }} ↗</a><div class="meta">{{ {"D": "Leadership PAC", "J": "Joint fundraising committee", "U": "Unauthorized committee", "B": "Lobbyist PAC"}.get(x.designation, "Committee") }} · {{ x.first_cycle }}{% if x.last_cycle != x.first_cycle %}–{{ x.last_cycle }}{% endif %}</div></li>{% endmacro %}
+    <ul class="list">{% for x in other_committees[:6] %}{{ committee_item(x) }}{% endfor %}</ul>
+    {% if other_committees | length > 6 %}
+    <details><summary class="small"><strong>{{ other_committees | length - 6 }} more</strong></summary><ul class="list">{% for x in other_committees[6:] %}{{ committee_item(x) }}{% endfor %}</ul></details>
+    {% endif %}
+    <p class="small muted" style="margin:.75rem 0 0">Separate from the campaign, so not counted in the figures on this page. Their records are on the FEC's site.</p>
+    {% else %}<p class="muted">The FEC doesn't link any leadership or joint fundraising committee to this person.</p>{% endif %}
+  </section>
+</div>
+
+{% elif view == "contributions" %}
+<form class="filters" method="get">
+  <input type="hidden" name="view" value="contributions">
+  <div class="wide"><label for="c-q">Donor, employer, occupation or city</label><input id="c-q" type="search" name="q" value="{{ f.q }}" placeholder="e.g. Microsoft or Spokane"></div>
+  <div><label for="c-y">Cycle</label><select id="c-y" name="cycle"><option value="">All cycles</option>{% for y in cycle_years %}<option{% if f.cycle == y | string %} selected{% endif %}>{{ y }}</option>{% endfor %}</select></div>
+  <div><label for="c-s">Type of donor</label><select id="c-s" name="source"><option value="">Any type</option>{% for s in sources %}<option{% if f.source == s %} selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+  <div><label for="c-w">From</label><select id="c-w" name="state">
+    <option value="">Anywhere</option>
+    <option value="WA"{% if f.state == "WA" %} selected{% endif %}>Washington</option>
+    <option value="OUT"{% if f.state == "OUT" %} selected{% endif %}>Outside Washington</option>
+  </select></div>
+  <div><label for="c-m">At least ($)</label><input id="c-m" type="number" min="0" step="1" name="min" value="{{ f.min }}"></div>
+  <div><label for="c-o">Sort</label><select id="c-o" name="sort">
+    <option value="recent"{% if f.sort == "recent" %} selected{% endif %}>Newest first</option>
+    <option value="largest"{% if f.sort == "largest" %} selected{% endif %}>Largest first</option>
+    <option value="oldest"{% if f.sort == "oldest" %} selected{% endif %}>Oldest first</option>
+  </select></div>
+  <div><label for="c-e">Show</label><select id="c-e" name="memo">
+    <option value="">Counted gifts</option>
+    <option value="1"{% if f.memo == "1" %} selected{% endif %}>Also memo entries</option>
+  </select></div>
+  <div class="actions"><button class="btn" type="submit">Apply</button></div>
+</form>
+{% if individuals %}
+<details class="card" style="margin-bottom:1rem">
+  <summary><strong>Top individual donors{% if f.cycle %} in {{ f.cycle }}{% endif %}</strong></summary>
+  <div class="table-wrap" style="margin-top:.75rem">
+  <table class="rtable">
+    <thead><tr><th scope="col">Donor</th><th scope="col">Employer and occupation</th><th scope="col">Place</th><th scope="col" class="num">Total</th><th scope="col" class="num">Gifts</th></tr></thead>
+    <tbody>
+    {% for d in individuals %}
+    <tr>
+      <td>{{ d.name }}</td>
+      <td data-label="Employer">{{ d.employer or "—" }}{% if d.occupation %} <span class="muted small">({{ d.occupation }})</span>{% endif %}</td>
+      <td data-label="Place">{{ d.city or "" }}{% if d.city and d.state %}, {% endif %}{{ d.state or "" }}</td>
+      <td data-label="Total" class="num">{{ d.total | usd }}</td>
+      <td data-label="Gifts" class="num">{{ d.n }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</details>
+{% endif %}
+<p class="result-meta">{{ "{:,}".format(listing.total) }} record{{ "" if listing.total == 1 else "s" }} · {{ listing.extra.total | usd }}{% if f.memo == "1" %}, not counting memo entries{% endif %}. The FEC's data files list contributions in whole dollars, so an amount can differ from the filed report by up to a dollar.</p>
+{% if listing.items %}
+<div class="table-wrap">
+<table class="rtable">
+  <thead><tr><th scope="col">Date</th><th scope="col">From</th><th scope="col">Place</th><th scope="col">Employer and occupation</th><th scope="col" class="num">Amount</th><th scope="col">Details</th><th scope="col">Report</th></tr></thead>
+  <tbody>
+  {% for x in listing.items %}
+  <tr>
+    <td class="nowrap">{{ x.tx_date | date }}</td>
+    <td class="desc">{% if x.dataset == "pas2" and x.other_id %}<a href="https://www.fec.gov/data/committee/{{ x.other_id }}/" rel="noopener nofollow"><strong>{{ x.name }}</strong> ↗</a>{% else %}<strong>{{ x.name }}</strong>{% endif %}<span class="sub">{{ x.source_type }}{% if x.connected_org and x.connected_org != "NONE" %} · {{ x.connected_org }}{% endif %}</span></td>
+    <td data-label="Place">{{ x.city or "" }}{% if x.city and x.state %}, {% endif %}{{ x.state or "" }}{% if x.zip %} {{ x.zip }}{% endif %}</td>
+    <td data-label="Employer">{{ x.employer or "—" }}{% if x.occupation %}<div class="muted small">{{ x.occupation }}</div>{% endif %}</td>
+    <td data-label="Amount" class="num"><strong>{{ x.amount | usd }}</strong>{% if x.is_refund %}<div class="muted small">Refund</div>{% endif %}{% if x.is_memo %}<div class="muted small">Memo, not counted</div>{% endif %}</td>
+    <td data-label="Details">{{ x.cycle }}{% if x.election %} · {{ x.election | election_label }}{% endif %}{% if x.tx_type == "15E" %}<div class="muted small">Sent through a conduit such as ActBlue</div>{% endif %}{% if x.memo_text %}<div class="muted small">{{ x.memo_text }}</div>{% endif %}</td>
+    <td data-label="Report">{% if x.image_num %}<a href="https://docquery.fec.gov/cgi-bin/fecimg/?{{ x.image_num }}" rel="noopener nofollow">FEC ↗</a>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{{ pager(listing, request) }}
+{% else %}<div class="card empty"><p>No contributions match.</p></div>{% endif %}
+
+{% elif view == "spending" %}
+<form class="filters" method="get">
+  <input type="hidden" name="view" value="spending">
+  <div class="wide"><label for="s-q">Paid to, or purpose</label><input id="s-q" type="search" name="q" value="{{ f.q }}" placeholder="e.g. printing"></div>
+  <div><label for="s-y">Cycle</label><select id="s-y" name="cycle"><option value="">All cycles</option>{% for y in cycle_years %}<option{% if f.cycle == y | string %} selected{% endif %}>{{ y }}</option>{% endfor %}</select></div>
+  <div><label for="s-c">Category</label><select id="s-c" name="category"><option value="">Any category</option>{% for s in roll.by_spend or [] %}<option{% if f.category == s.category %} selected{% endif %}>{{ s.category }}</option>{% endfor %}</select></div>
+  <div><label for="s-o">Sort</label><select id="s-o" name="sort">
+    <option value="recent"{% if f.sort == "recent" %} selected{% endif %}>Newest first</option>
+    <option value="largest"{% if f.sort == "largest" %} selected{% endif %}>Largest first</option>
+    <option value="oldest"{% if f.sort == "oldest" %} selected{% endif %}>Oldest first</option>
+  </select></div>
+  <div class="actions"><button class="btn" type="submit">Apply</button></div>
+</form>
+<p class="result-meta">{{ "{:,}".format(listing.total) }} payment{{ "" if listing.total == 1 else "s" }} · {{ listing.extra.total | usd_cents }}. The FEC has itemized operating expenses from 2004 on.</p>
+{% if listing.items %}
+<div class="table-wrap">
+<table class="rtable">
+  <thead><tr><th scope="col">Date</th><th scope="col">Paid to</th><th scope="col">Place</th><th scope="col">For</th><th scope="col" class="num">Amount</th><th scope="col">Report</th></tr></thead>
+  <tbody>
+  {% for x in listing.items %}
+  <tr>
+    <td class="nowrap">{{ x.tx_date | date }}</td>
+    <td class="desc"><strong>{{ x.name or "Not stated" }}</strong><span class="sub">{{ x.cycle }} cycle</span></td>
+    <td data-label="Place">{{ x.city or "" }}{% if x.city and x.state %}, {% endif %}{{ x.state or "" }}</td>
+    <td data-label="For">{{ x.category }}{% if x.purpose and x.purpose != x.category %}<div class="muted small">{{ x.purpose }}</div>{% endif %}</td>
+    <td data-label="Amount" class="num"><strong>{{ x.amount | usd_cents }}</strong></td>
+    <td data-label="Report">{% if x.image_num %}<a href="https://docquery.fec.gov/cgi-bin/fecimg/?{{ x.image_num }}" rel="noopener nofollow">FEC ↗</a>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{{ pager(listing, request) }}
+{% else %}<div class="card empty"><p>No payments match.</p></div>{% endif %}
+
+{% elif view == "outside" %}
+<p class="muted">Money others spent to support or oppose {{ p.name }} without coordinating with the campaign, as reported to the FEC. This kind of spending has no contribution limits. The FEC publishes these records from 2010 on.</p>
+{% if by_spender %}
+<section class="stats" aria-label="Outside spending totals">
+  <div class="stat"><div class="n">{{ outside_totals.supporting | usd_short }}</div><div class="l">Spent supporting</div></div>
+  <div class="stat"><div class="n">{{ outside_totals.opposing | usd_short }}</div><div class="l">Spent opposing</div></div>
+</section>
+<h2 style="margin-top:1rem">Who spent it</h2>
+<div class="table-wrap"><table class="rtable">
+  <thead><tr><th scope="col">Cycle</th><th scope="col">Spent by</th><th scope="col">Position</th><th scope="col" class="num">Amount</th><th scope="col">Dates</th></tr></thead>
+  <tbody>{% for x in by_spender %}
+  <tr>
+    <td>{{ x.cycle }}</td>
+    <td class="desc">{% if x.spender_id %}<a href="https://www.fec.gov/data/committee/{{ x.spender_id }}/" rel="noopener"><strong>{{ x.spender_name or x.spender_id }}</strong> ↗</a>{% else %}<strong>{{ x.spender_name }}</strong>{% endif %}</td>
+    <td data-label="Position"><span class="badge {{ 'tone-law' if x.support_oppose == 'S' else 'tone-bad' }}">{{ "Supporting" if x.support_oppose == "S" else "Opposing" }}</span></td>
+    <td data-label="Amount" class="num">{{ x.total | usd_cents }}</td>
+    <td data-label="Dates" class="nowrap">{{ x.first_date | date }}{% if x.last_date != x.first_date %} – {{ x.last_date | date }}{% endif %}</td>
+  </tr>{% endfor %}</tbody>
+</table></div>
+<h2 style="margin-top:1.5rem">Every expense</h2>
+<p class="result-meta">{{ "{:,}".format(listing.total) }} record{{ "" if listing.total == 1 else "s" }}</p>
+<div class="table-wrap"><table class="rtable">
+  <thead><tr><th scope="col">Date</th><th scope="col">Spent by</th><th scope="col">Paid to, and for</th><th scope="col">Position</th><th scope="col" class="num">Amount</th><th scope="col">Report</th></tr></thead>
+  <tbody>{% for x in listing.items %}
+  <tr>
+    <td class="nowrap">{{ x.tx_date | date }}</td>
+    <td class="desc">{{ x.spender_name or x.spender_id }}</td>
+    <td data-label="Paid to">{{ x.payee or "—" }}{% if x.purpose %}<div class="muted small">{{ x.purpose }}</div>{% endif %}</td>
+    <td data-label="Position">{{ "Supporting" if x.support_oppose == "S" else "Opposing" }}</td>
+    <td data-label="Amount" class="num">{{ x.amount | usd_cents }}</td>
+    <td data-label="Report">{% if x.image_num %}<a href="https://docquery.fec.gov/cgi-bin/fecimg/?{{ x.image_num }}" rel="noopener nofollow">FEC ↗</a>{% endif %}</td>
+  </tr>{% endfor %}</tbody>
+</table></div>
+{{ pager(listing, request) }}
+{% else %}<div class="card empty"><p>No independent spending names this person.</p></div>{% endif %}
+{% endif %}
+{% endif %}
+{{ fec_note() }}
+{% endblock %}

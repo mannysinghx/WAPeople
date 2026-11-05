@@ -259,7 +259,7 @@ class MoneySync:
                 "title": title if is_current else f"Former {title}", "party": m["party"],
                 "chamber": m["agency"], "district": m["district"], "is_current": is_current,
                 "pdc_person_ids": link.person_ids, "link_method": link.method, "link_note": link.note,
-                "source_url": None,
+                "source_url": None, "fec_candidate_ids": [],
             }
             if is_current and not link.person_ids:
                 unlinked_current.append(m["name"])
@@ -275,20 +275,33 @@ class MoneySync:
                 rows[pk] = {"id": pk, "member_id": None, "name": o["name"], "kind": o["kind"],
                             "title": o["title"], "party": None, "chamber": None, "district": None,
                             "is_current": True, "pdc_person_ids": [pid], "link_method": "official roster",
-                            "link_note": None, "source_url": o["source_url"]}
+                            "link_note": None, "source_url": o["source_url"], "fec_candidate_ids": []}
+
+        # Members of Congress: someone who also served in the Legislature keeps one page for both.
+        for o in roster.get("federal", []):
+            row = rows.get(o.get("member_id"))
+            fields = dict(name=o["name"], kind="federal", title=o["title"], party=o["party"], is_current=True, chamber=None,
+                          district=None, source_url=o["source_url"], fec_candidate_ids=o["fec_candidate_ids"])
+            if row:
+                row.update(fields)
+            else:
+                rows[o["id"]] = {"id": o["id"], "member_id": None, "pdc_person_ids": [],
+                                 "link_method": "official roster", "link_note": None, **fields}
 
         with self.conn.cursor() as cur:
             cur.execute("DELETE FROM money_people WHERE NOT (id = ANY(%s))", (list(rows),))
             cur.executemany(
                 "INSERT INTO money_people (id, member_id, name, kind, title, party, chamber, district,"
-                " is_current, pdc_person_ids, link_method, link_note, source_url)"
+                " is_current, pdc_person_ids, link_method, link_note, source_url, fec_candidate_ids)"
                 " VALUES (%(id)s, %(member_id)s, %(name)s, %(kind)s, %(title)s, %(party)s, %(chamber)s,"
-                " %(district)s, %(is_current)s, %(pdc_person_ids)s, %(link_method)s, %(link_note)s, %(source_url)s)"
+                " %(district)s, %(is_current)s, %(pdc_person_ids)s, %(link_method)s, %(link_note)s, %(source_url)s,"
+                " %(fec_candidate_ids)s)"
                 " ON CONFLICT (id) DO UPDATE SET member_id = EXCLUDED.member_id, name = EXCLUDED.name,"
                 " kind = EXCLUDED.kind, title = EXCLUDED.title, party = EXCLUDED.party,"
                 " chamber = EXCLUDED.chamber, district = EXCLUDED.district, is_current = EXCLUDED.is_current,"
                 " pdc_person_ids = EXCLUDED.pdc_person_ids, link_method = EXCLUDED.link_method,"
-                " link_note = EXCLUDED.link_note, source_url = EXCLUDED.source_url, updated_at = now()",
+                " link_note = EXCLUDED.link_note, source_url = EXCLUDED.source_url,"
+                " fec_candidate_ids = EXCLUDED.fec_candidate_ids, updated_at = now()",
                 list(rows.values()),
             )
         self.conn.commit()

@@ -11,11 +11,12 @@ GROUPS = {
     "senate": "State Senate",
     "statewide": "Statewide officials",
     "justice": "Supreme Court justices",
+    "federal": "U.S. Congress",
 }
 PEOPLE_SORTS = {
-    "raised": "p.total_raised DESC, p.name",
-    "latest": "p.latest_raised DESC NULLS LAST, p.name",
-    "spent": "p.total_spent DESC, p.name",
+    "raised": "p.total_raised + p.fed_raised DESC, p.name",
+    "latest": "coalesce(p.fed_latest_raised, p.latest_raised) DESC NULLS LAST, p.name",
+    "spent": "p.total_spent + p.fed_spent DESC, p.name",
     "name": "p.name",
     "district": "NULLIF(p.district, '')::int NULLS LAST, p.chamber DESC, p.name",
 }
@@ -36,7 +37,8 @@ def overview(c: psycopg.Connection) -> dict:
         "SELECT count(*) FILTER (WHERE is_current) AS current_people,"
         " count(*) FILTER (WHERE n_campaigns > 0) AS with_records,"
         " coalesce(sum(total_raised) FILTER (WHERE is_current), 0) AS current_raised,"
-        " coalesce(sum(n_contributions), 0) AS contributions,"
+        " coalesce(sum(fed_raised) FILTER (WHERE is_current), 0) AS current_fed_raised,"
+        " coalesce(sum(n_contributions + fed_contributions), 0) AS contributions,"
         " max(updated_at) AS updated_at FROM money_people"
     ).fetchone()
     row["orgs"] = c.execute("SELECT count(*) AS n FROM money_orgs").fetchone()["n"]
@@ -50,7 +52,7 @@ def list_people(c: psycopg.Connection, *, group: str = "all", party: str = "", q
         where.append("p.kind = 'legislator' AND p.chamber = 'House'")
     elif group == "senate":
         where.append("p.kind = 'legislator' AND p.chamber = 'Senate'")
-    elif group in ("statewide", "justice"):
+    elif group in ("statewide", "justice", "federal"):
         where.append("p.kind = %(kind)s")
         params["kind"] = group
     if party in ("D", "R"):
@@ -63,7 +65,9 @@ def list_people(c: psycopg.Connection, *, group: str = "all", party: str = "", q
     return c.execute(
         "SELECT p.id, p.member_id, p.name, p.kind, p.title, p.party, p.chamber, p.district, p.is_current,"
         " p.total_raised, p.total_spent, p.latest_year, p.latest_raised, p.in_state, p.out_of_state,"
-        " p.not_stated, p.total_itemized, p.top_source, p.n_campaigns FROM money_people p"
+        " p.not_stated, p.total_itemized, p.top_source, p.n_campaigns, p.fec_candidate_ids, p.fed_raised, p.fed_spent,"
+        " p.fed_cycles, p.fed_latest_raised, p.fed_last_cycle, p.fed_in_state, p.fed_out_of_state, p.fed_top_source"
+        " FROM money_people p"
         " WHERE " + " AND ".join(where) + f" ORDER BY {order} LIMIT 700",
         params,
     ).fetchall()
@@ -283,5 +287,6 @@ def search_orgs(c: psycopg.Connection, q: str, limit: int = 6) -> list[dict]:
 
 def legislator_money(c: psycopg.Connection, member_id: int) -> dict | None:
     return c.execute(
-        "SELECT id, total_raised, total_spent, n_campaigns FROM money_people WHERE member_id = %s", (member_id,)
+        "SELECT id, total_raised + fed_raised AS total_raised, total_spent, n_campaigns FROM money_people WHERE member_id = %s",
+        (member_id,),
     ).fetchone()

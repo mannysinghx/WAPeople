@@ -25,6 +25,7 @@ docker compose run --rm sync python -m wapeople.sync initial                    
 docker compose run --rm sync python -m wapeople.sync legislature --biennium 2025-26
 docker compose run --rm sync python -m wapeople.sync courts --since 2024-01-01
 docker compose run --rm sync python -m wapeople.sync money                         # officials' campaign money
+docker compose run --rm sync python -m wapeople.sync fec                           # members of Congress
 docker compose run --rm sync python -m wapeople.sync refresh                       # what the daily job does
 ```
 
@@ -60,9 +61,12 @@ table at startup. Map rendering uses MapLibre GL JS (bundled in `static/vendor`)
 
 ## Money trails
 
-`/money` lists every sitting legislator, statewide official and Supreme Court justice; `/money/{id}` shows
-one person's money, and `/money/organizations` shows who gave across officials. All of it comes from the
-Washington Public Disclosure Commission's open data on data.wa.gov (no key needed).
+`/money` lists every sitting legislator, statewide official, Supreme Court justice and member of Congress;
+`/money/{id}` shows one person's money, and `/money/organizations` shows who gave across state officials. State
+figures come from the Washington Public Disclosure Commission's open data on data.wa.gov, and federal figures
+from the Federal Election Commission's public bulk files. Neither needs a key. The two are kept in separate
+tables and labeled on every page, and never added together. A member of Congress who earlier ran for state
+office has one page with both, on separate tabs (`?records=state`).
 
 | Tab | PDC dataset |
 | --- | --- |
@@ -86,7 +90,37 @@ Washington Public Disclosure Commission's open data on data.wa.gov (no key neede
   a dependent from financial statements. Itemized donor pages are `noindex` and blocked in `robots.txt`.
 - **Condition of release:** the PDC's data may not be used for commercial purposes (RCW 42.56.070(9)). The site
   states this on every money page and in the terms. Don't add ads or sell access without reading that first.
-- Federal officials report to the FEC and aren't included, nor are county and city officials.
+- County and city officials aren't included.
+
+### Federal money (FEC)
+
+| Tab | FEC file |
+| --- | --- |
+| Totals per candidate and cycle | All candidates `weball` |
+| Committees | Candidate-committee linkage `ccl`, committee master `cm`, candidate master `cn` |
+| Contributions | Individual contributions `indiv`, committee contributions to candidates `pas2`, other transactions `oth` |
+| Spending | Operating expenditures `oppexp` (2004 on), plus payments to other committees from `oth` |
+| Outside money | Independent expenditures `independent_expenditure_YYYY.csv` (2010 on) |
+
+- **Why bulk files, not the API:** no key or sign-up, no rate limit (`DEMO_KEY` allows about 10 requests an hour;
+  a free key allows 1,000, or about 100,000 rows an hour), and the transaction files have no street addresses.
+- **How:** `money/fec_bulk.py` reads one member of a remote zip straight off the network with range requests, so
+  nothing is written to disk and a dropped connection resumes. Scanning the whole national `indiv24` file takes
+  under a minute. `python -m wapeople.sync fec` runs in the daily job, but a file is only read when its ETag
+  changes, and no sooner than weekly for the current cycle or monthly for older ones. `--full` reloads everything.
+- **Reading the files:** memo code X rows don't count toward totals, types 21Y and 22Y are refunds shown as
+  positive numbers, and a committee's gift is in the giver's report (`pas2`), so the giver is the first column.
+  See the notes at the top of `money/fec.py`.
+- **Totals vs. rows:** `fec_cycles` holds the FEC's own reported totals, and "where the money came from" adds up
+  to them exactly. Itemized rows won't add up to reported figures to the cent, for reasons the FEC's own data has:
+  gifts of $200 or less aren't itemized, and givers and recipients report at different times. Each cycle stores
+  the row sums beside the reported figures (`itemized_*`), and the `fec` row in `sync_runs` has the overall comparison.
+- **Who:** the delegation is in `data/money_officials.json` under `federal`, checked against the Clerk of the
+  House and senate.gov. **Update it when members change** (next: January 2027). Leadership and joint fundraising
+  committees the FEC links to a member are listed but not itemized or counted.
+- **Privacy:** ZIP codes are cut to five digits, the committee file's street addresses and treasurer names aren't
+  copied, and the same free-text scrubbing as the state data applies. Federal law bars selling donor information
+  from FEC reports or using it to solicit or for any commercial purpose (52 U.S.C. § 30111(a)(4)).
 
 ## Contact form
 
@@ -118,7 +152,8 @@ messages are kept with `email_status = 'spam'` but not emailed.
 | --- | --- |
 | Bills, versions, sponsors, history, roll calls, legislators | [WA Legislature web services](https://wslwebservices.leg.wa.gov/) (public, no key) |
 | Supreme Court decisions | [CourtListener](https://www.courtlistener.com/) search API (Free Law Project) + official PDFs from [courts.wa.gov](https://www.courts.wa.gov/opinions/) |
-| Campaign money, financial statements | [Washington Public Disclosure Commission](https://www.pdc.wa.gov/political-disclosure-reporting-data/open-data) on data.wa.gov (no key) |
+| State campaign money, financial statements | [Washington Public Disclosure Commission](https://www.pdc.wa.gov/political-disclosure-reporting-data/open-data) on data.wa.gov (no key) |
+| Federal campaign money | [Federal Election Commission bulk data](https://www.fec.gov/data/browse-data/?tab=bulk-data) (no key) |
 
 CourtListener's search API has required a token since late October 2026; without one it answers 401, existing
 decisions stay on the site, new ones aren't collected, and the daily job exits with an error naming the fix.

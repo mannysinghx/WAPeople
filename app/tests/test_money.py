@@ -138,7 +138,8 @@ def test_real_employers_are_kept(value):
 
 def test_zip_codes_must_look_like_zip_codes():
     assert C.zip_code("98122") == "98122"
-    assert C.zip_code("98122-5204") == "98122-5204"
+    assert C.zip_code("98122-5204") == "98122"      # nine digits can point to one building
+    assert C.zip_code("981225204") == "98122"
     for junk in ("'0709", "+90", ", 983", "09/24", "", None):
         assert C.zip_code(junk) is None
 

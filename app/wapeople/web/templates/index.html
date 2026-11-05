@@ -60,7 +60,7 @@
 {% if money.with_records %}
 <a class="banner card-link" href="/money" style="margin-top:1rem">
   <strong>Follow the money</strong>
-  Who funds Washington's {{ money.current_people }} state legislators, statewide officials and Supreme Court justices: {{ money.current_raised | usd_short }} raised, {{ "{:,}".format(money.contributions) }} itemized contributions, and where it all went. →
+  Who funds Washington's {{ money.current_people }} legislators, statewide officials, Supreme Court justices and members of Congress: {{ "{:,}".format(money.contributions) }} itemized contributions, who gave them, and where the money went. →
 </a>
 {% endif %}
 

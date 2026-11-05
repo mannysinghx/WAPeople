@@ -12,7 +12,7 @@
   <li><strong>How every legislator voted</strong>, on every recorded vote, with dates.</li>
   <li><strong>Who represents you</strong>, on a map of all 49 legislative districts.</li>
   <li><strong>What the courts said</strong>: Washington Supreme Court decisions about laws and public policy.</li>
-  <li><strong>Who funds them</strong>: <a href="/money">money trails</a> for every legislator, statewide official and Supreme Court justice: how much they raised, who gave it, where it came from, and where it went.</li>
+  <li><strong>Who funds them</strong>: <a href="/money">money trails</a> for every legislator, statewide official, Supreme Court justice and member of Congress: how much they raised, who gave it, where it came from, and where it went.</li>
 </ul>
 <p>We believe an informed public makes for better government. WA People is <strong>nonpartisan</strong>: it doesn't endorse candidates, parties, or positions, and it reports the official record as it is. It's <strong>free</strong>, has <strong>no ads and no tracking</strong>, and is built entirely with open-source software and public data. It updates itself every day.</p>
 <p>See something wrong, or have an idea? <a href="/contact">Contact us</a>. Corrections help everyone.</p>
@@ -25,6 +25,7 @@
   <li><strong>Bills, sponsors, history and votes:</strong> the Washington State Legislature's public <a href="https://wslwebservices.leg.wa.gov/">web services</a>, the same data behind <a href="https://app.leg.wa.gov/">app.leg.wa.gov</a>.</li>
   <li><strong>Supreme Court decisions:</strong> <a href="https://www.courtlistener.com/">CourtListener</a>, the free legal archive run by the nonprofit Free Law Project. Full opinion text comes from the official PDFs published by the <a href="https://www.courts.wa.gov/opinions/">Washington Courts</a>.</li>
   <li><strong>Campaign money and financial statements:</strong> the <a href="https://www.pdc.wa.gov/">Washington Public Disclosure Commission</a>'s open data on <a href="https://data.wa.gov/">data.wa.gov</a>.</li>
+  <li><strong>Federal campaign money:</strong> the <a href="https://www.fec.gov/data/browse-data/?tab=bulk-data">Federal Election Commission's public data files</a>.</li>
 </ul>
 <p>This is not an official government website. For anything that matters legally, check the official bill page or the opinion itself. Every page here links to its official source.</p>
 
@@ -53,7 +54,7 @@
 <h2 id="money">How the money trails work</h2>
 <p>Candidates in Washington must report the money they raise and spend to the Public Disclosure Commission (PDC). WA People loads those reports for each person who holds a state legislative seat, a statewide office, or a seat on the Supreme Court, plus former legislators. It covers every Washington campaign in the PDC's records for that person, not only the race for their current office. Each record links to the report it came from.</p>
 <ul>
-  <li><strong>Who is included:</strong> legislators come from the Legislature's roster. Statewide officials and justices are on a list checked against the <a href="https://www.courts.wa.gov/court_dir/orgs/112.html">Court Directory</a> and PDC election results. Federal officeholders report to the Federal Election Commission instead and aren't included, nor are county and city officials.</li>
+  <li><strong>Who is included:</strong> legislators come from the Legislature's roster. Statewide officials and justices are on a list checked against the <a href="https://www.courts.wa.gov/court_dir/orgs/112.html">Court Directory</a> and PDC election results. Members of Congress are on a list checked against the <a href="https://clerk.house.gov/Members">Clerk of the House</a> and <a href="https://www.senate.gov/senators/">senate.gov</a>. County and city officials aren't included, because no single official roster lists them.</li>
   <li><strong>How people are matched:</strong> a legislator is linked to PDC records only when the last name, the first name and a campaign for the same seat at the right time all agree. When they don't, we show no records instead of guessing. A few are linked by hand, with a note on the page.</li>
   <li><strong>How far back it goes:</strong> the PDC's electronic candidate records begin with the 2009–10 election cycle, so earlier careers don't appear. Campaigns that use the PDC's "mini reporting" option file no itemized records, only a total.</li>
   <li><strong>How donors are grouped:</strong> "where it came from" uses the category each filer reported. Organization names are grouped when they differ only by capitalization, punctuation, or a fixed list of abbreviations (WA, PAC, Assn., and shorthand for the main party and caucus committees), so one organization can still appear under several spellings. Small gifts that campaigns may report as a lump sum have no name or location. "Miscellaneous receipts" aren't gifts: they're often money moved from the candidate's earlier campaign or surplus account, which then counts again in the campaign that receives it. An individual's employer shows where they work; the employer didn't give that money.</li>
@@ -62,11 +63,21 @@
   <li><strong>Checking the totals:</strong> every day each campaign's count and total of records are compared with the PDC's own, and any campaign that differs is reloaded. Reports can be amended, so figures can change after a filing.</li>
   <li><strong>What we leave out on purpose:</strong> street addresses, phone numbers and emails, which the source publishes, aren't copied here. Personal financial statements omit home addresses, family members' names, and anything reported only for a dependent. Individual donors' listings are kept out of search engines. The official filings at the PDC have the complete record.</li>
 </ul>
+<h3 id="federal">Members of Congress</h3>
+<p>Federal candidates report to the Federal Election Commission (FEC), under different rules from state candidates, so federal and state figures are kept apart and never added together. A member of Congress who earlier ran for state office has both, on separate tabs.</p>
+<ul>
+  <li><strong>Totals are the FEC's own</strong> for each candidate and two-year cycle. "Where the money came from" uses those reported totals, so its parts add up to the FEC's figure.</li>
+  <li><strong>Itemized records won't add up to those totals exactly.</strong> Donors of $200 or less don't have to be named, so "small gifts" are what's left of individuals' money after the itemized gifts. Committees' gifts come from the reports of the committees that gave, and reports can be amended or filed at different times.</li>
+  <li><strong>Memo entries and refunds:</strong> memo entries give detail about money already counted, so they aren't added to totals. Refunds are shown as negative amounts.</li>
+  <li><strong>Whole dollars:</strong> the FEC's data files list each contribution in whole dollars, so an itemized amount can differ from the filed report by up to a dollar. The totals include the cents.</li>
+  <li><strong>The next step back:</strong> each giving committee links to its page at the FEC, which shows who funds it. Leadership and joint fundraising committees the FEC links to a member are listed but not counted in that member's figures.</li>
+  <li><strong>How far back:</strong> this covers each cycle from 1992 on where the FEC has a record. Itemized operating expenses begin in 2004, and independent spending records in 2010.</li>
+</ul>
 <p><strong>A contribution isn't an accusation.</strong> These records show who gave money, not that anyone received anything in return. WA People doesn't connect donations to votes or draw conclusions from them.</p>
-<p class="small muted">Condition of release, from the PDC: this data constitutes a list of individuals and may not be used for commercial purposes (RCW 42.56.070(9) and AGO 1975 No. 15). WA People is free and has no ads or sponsors.</p>
+<p class="small muted">Condition of release, from the PDC: this data constitutes a list of individuals and may not be used for commercial purposes (RCW 42.56.070(9) and AGO 1975 No. 15). Federal law likewise bars selling donor information from FEC reports or using it to solicit contributions or for any commercial purpose. WA People is free and has no ads or sponsors.</p>
 
 <h2 id="freshness">Freshness</h2>
-<p>The current session, new court decisions and campaign money are refreshed every morning. Past sessions don't change.{% if updated.get("courts") %} Court decisions were last refreshed {{ updated["courts"] | date }}{% if updated.get("money") %}, campaign money {{ updated["money"] | date }}{% endif %}.{% endif %}</p>
+<p>The current session, new court decisions and state campaign money are refreshed every morning, and federal campaign money each week after the FEC updates its files. Past sessions don't change.{% if updated.get("courts") %} Court decisions were last refreshed {{ updated["courts"] | date }}{% if updated.get("money") %}, campaign money {{ updated["money"] | date }}{% endif %}.{% endif %}</p>
 <div class="table-wrap" style="margin-top:.5rem">
 <table class="rtable">
   <thead><tr><th scope="col">Session</th><th scope="col">State</th><th scope="col">Last legislative activity</th><th scope="col">Last refreshed</th></tr></thead>

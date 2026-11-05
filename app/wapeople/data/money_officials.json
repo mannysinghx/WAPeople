@@ -2,27 +2,282 @@
   "as_of": "2026-11-05",
   "note": "Statewide officials and Supreme Court justices holding office on as_of. Legislators come from the Legislature's roster and need no entry here. person_id is the Public Disclosure Commission's id. Winners of the November 3, 2026 election take office in January 2027: update this list then.",
   "officials": [
-    {"person_id": 1108, "name": "Bob Ferguson", "title": "Governor", "kind": "statewide", "source_url": "https://governor.wa.gov/"},
-    {"person_id": 27461, "name": "Denny Heck", "title": "Lieutenant Governor", "kind": "statewide", "source_url": "https://ltgov.wa.gov/"},
-    {"person_id": 206, "name": "Steve Hobbs", "title": "Secretary of State", "kind": "statewide", "source_url": "https://www.sos.wa.gov/"},
-    {"person_id": 25657, "name": "Mike Pellicciotti", "title": "State Treasurer", "kind": "statewide", "source_url": "https://tre.wa.gov/"},
-    {"person_id": 1082, "name": "Pat McCarthy", "title": "State Auditor", "kind": "statewide", "source_url": "https://sao.wa.gov/"},
-    {"person_id": 49014, "name": "Nick Brown", "title": "Attorney General", "kind": "statewide", "source_url": "https://www.atg.wa.gov/"},
-    {"person_id": 1057, "name": "Dave Upthegrove", "title": "Commissioner of Public Lands", "kind": "statewide", "source_url": "https://www.dnr.wa.gov/"},
-    {"person_id": 1070, "name": "Chris Reykdal", "title": "Superintendent of Public Instruction", "kind": "statewide", "source_url": "https://ospi.k12.wa.us/"},
-    {"person_id": 25512, "name": "Patty Kuderer", "title": "Insurance Commissioner", "kind": "statewide", "source_url": "https://www.insurance.wa.gov/"},
-    {"person_id": 1121, "name": "Debra L. Stephens", "title": "Chief Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
-    {"person_id": 6352, "name": "Charles W. Johnson", "title": "Associate Chief Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
-    {"person_id": 483, "name": "Steven C. González", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
-    {"person_id": 226, "name": "Sheryl Gordon McCloud", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
-    {"person_id": 4139, "name": "Raquel Montoya-Lewis", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
-    {"person_id": 29919, "name": "G. Helen Whitener", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
-    {"person_id": 38253, "name": "Salvador A. Mungia", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
-    {"person_id": 55396, "name": "Colleen Melody", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
-    {"person_id": 56177, "name": "Theodore J. Angelis", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"}
+    {
+      "person_id": 1108,
+      "name": "Bob Ferguson",
+      "title": "Governor",
+      "kind": "statewide",
+      "source_url": "https://governor.wa.gov/"
+    },
+    {
+      "person_id": 27461,
+      "name": "Denny Heck",
+      "title": "Lieutenant Governor",
+      "kind": "statewide",
+      "source_url": "https://ltgov.wa.gov/"
+    },
+    {
+      "person_id": 206,
+      "name": "Steve Hobbs",
+      "title": "Secretary of State",
+      "kind": "statewide",
+      "source_url": "https://www.sos.wa.gov/"
+    },
+    {
+      "person_id": 25657,
+      "name": "Mike Pellicciotti",
+      "title": "State Treasurer",
+      "kind": "statewide",
+      "source_url": "https://tre.wa.gov/"
+    },
+    {
+      "person_id": 1082,
+      "name": "Pat McCarthy",
+      "title": "State Auditor",
+      "kind": "statewide",
+      "source_url": "https://sao.wa.gov/"
+    },
+    {
+      "person_id": 49014,
+      "name": "Nick Brown",
+      "title": "Attorney General",
+      "kind": "statewide",
+      "source_url": "https://www.atg.wa.gov/"
+    },
+    {
+      "person_id": 1057,
+      "name": "Dave Upthegrove",
+      "title": "Commissioner of Public Lands",
+      "kind": "statewide",
+      "source_url": "https://www.dnr.wa.gov/"
+    },
+    {
+      "person_id": 1070,
+      "name": "Chris Reykdal",
+      "title": "Superintendent of Public Instruction",
+      "kind": "statewide",
+      "source_url": "https://ospi.k12.wa.us/"
+    },
+    {
+      "person_id": 25512,
+      "name": "Patty Kuderer",
+      "title": "Insurance Commissioner",
+      "kind": "statewide",
+      "source_url": "https://www.insurance.wa.gov/"
+    },
+    {
+      "person_id": 1121,
+      "name": "Debra L. Stephens",
+      "title": "Chief Justice, Washington Supreme Court",
+      "kind": "justice",
+      "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"
+    },
+    {
+      "person_id": 6352,
+      "name": "Charles W. Johnson",
+      "title": "Associate Chief Justice, Washington Supreme Court",
+      "kind": "justice",
+      "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"
+    },
+    {
+      "person_id": 483,
+      "name": "Steven C. González",
+      "title": "Justice, Washington Supreme Court",
+      "kind": "justice",
+      "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"
+    },
+    {
+      "person_id": 226,
+      "name": "Sheryl Gordon McCloud",
+      "title": "Justice, Washington Supreme Court",
+      "kind": "justice",
+      "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"
+    },
+    {
+      "person_id": 4139,
+      "name": "Raquel Montoya-Lewis",
+      "title": "Justice, Washington Supreme Court",
+      "kind": "justice",
+      "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"
+    },
+    {
+      "person_id": 29919,
+      "name": "G. Helen Whitener",
+      "title": "Justice, Washington Supreme Court",
+      "kind": "justice",
+      "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"
+    },
+    {
+      "person_id": 38253,
+      "name": "Salvador A. Mungia",
+      "title": "Justice, Washington Supreme Court",
+      "kind": "justice",
+      "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"
+    },
+    {
+      "person_id": 55396,
+      "name": "Colleen Melody",
+      "title": "Justice, Washington Supreme Court",
+      "kind": "justice",
+      "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"
+    },
+    {
+      "person_id": 56177,
+      "name": "Theodore J. Angelis",
+      "title": "Justice, Washington Supreme Court",
+      "kind": "justice",
+      "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"
+    }
   ],
   "manual_links": {
-    "17204": {"person_ids": [4015], "note": "J.D. Rossetti files with the PDC as Justin Rossetti (same district and chamber)."},
-    "18701": {"person_ids": [182], "note": "Douglas Roulstone (same name and district; his only PDC campaign is a later Senate run)."}
-  }
+    "17204": {
+      "person_ids": [
+        4015
+      ],
+      "note": "J.D. Rossetti files with the PDC as Justin Rossetti (same district and chamber)."
+    },
+    "18701": {
+      "person_ids": [
+        182
+      ],
+      "note": "Douglas Roulstone (same name and district; his only PDC campaign is a later Senate run)."
+    }
+  },
+  "note_federal": "Washington's members of Congress on as_of, from the Clerk of the House member list and senate.gov. fec_candidate_ids were matched in the FEC's candidate file by name, state and office. member_id is set when the same person served in the state Legislature. id is only used when member_id is null. Winners of the November 3, 2026 election take office in January 2027: update this list then.",
+  "federal": [
+    {
+      "id": null,
+      "member_id": 299,
+      "name": "Patty Murray",
+      "title": "U.S. Senator",
+      "party": "D",
+      "fec_candidate_ids": [
+        "S2WA00189"
+      ],
+      "source_url": "https://www.murray.senate.gov/"
+    },
+    {
+      "id": null,
+      "member_id": 68,
+      "name": "Maria Cantwell",
+      "title": "U.S. Senator",
+      "party": "D",
+      "fec_candidate_ids": [
+        "S8WA00194",
+        "H2WA01054"
+      ],
+      "source_url": "https://www.cantwell.senate.gov/"
+    },
+    {
+      "id": 2000001,
+      "member_id": null,
+      "name": "Suzan K. DelBene",
+      "title": "U.S. Representative, WA-1",
+      "party": "D",
+      "fec_candidate_ids": [
+        "H0WA08046"
+      ],
+      "source_url": "https://clerk.house.gov/Members/D000617"
+    },
+    {
+      "id": 2000002,
+      "member_id": null,
+      "name": "Rick Larsen",
+      "title": "U.S. Representative, WA-2",
+      "party": "D",
+      "fec_candidate_ids": [
+        "H0WA02080"
+      ],
+      "source_url": "https://clerk.house.gov/Members/L000560"
+    },
+    {
+      "id": 2000003,
+      "member_id": null,
+      "name": "Marie Gluesenkamp Perez",
+      "title": "U.S. Representative, WA-3",
+      "party": "D",
+      "fec_candidate_ids": [
+        "H2WA03217"
+      ],
+      "source_url": "https://clerk.house.gov/Members/G000600"
+    },
+    {
+      "id": null,
+      "member_id": 8236,
+      "name": "Dan Newhouse",
+      "title": "U.S. Representative, WA-4",
+      "party": "R",
+      "fec_candidate_ids": [
+        "H4WA04104"
+      ],
+      "source_url": "https://clerk.house.gov/Members/N000189"
+    },
+    {
+      "id": null,
+      "member_id": 15780,
+      "name": "Michael Baumgartner",
+      "title": "U.S. Representative, WA-5",
+      "party": "R",
+      "fec_candidate_ids": [
+        "H4WA05234",
+        "S2WA00288"
+      ],
+      "source_url": "https://clerk.house.gov/Members/B001322"
+    },
+    {
+      "id": null,
+      "member_id": 29112,
+      "name": "Emily Randall",
+      "title": "U.S. Representative, WA-6",
+      "party": "D",
+      "fec_candidate_ids": [
+        "H4WA06117"
+      ],
+      "source_url": "https://clerk.house.gov/Members/R000621"
+    },
+    {
+      "id": null,
+      "member_id": 20751,
+      "name": "Pramila Jayapal",
+      "title": "U.S. Representative, WA-7",
+      "party": "D",
+      "fec_candidate_ids": [
+        "H6WA07458"
+      ],
+      "source_url": "https://clerk.house.gov/Members/J000298"
+    },
+    {
+      "id": 2000008,
+      "member_id": null,
+      "name": "Kim Schrier",
+      "title": "U.S. Representative, WA-8",
+      "party": "D",
+      "fec_candidate_ids": [
+        "H8WA08189"
+      ],
+      "source_url": "https://clerk.house.gov/Members/S001216"
+    },
+    {
+      "id": null,
+      "member_id": 402,
+      "name": "Adam Smith",
+      "title": "U.S. Representative, WA-9",
+      "party": "D",
+      "fec_candidate_ids": [
+        "H6WA09025"
+      ],
+      "source_url": "https://clerk.house.gov/Members/S000510"
+    },
+    {
+      "id": 2000010,
+      "member_id": null,
+      "name": "Marilyn Strickland",
+      "title": "U.S. Representative, WA-10",
+      "party": "D",
+      "fec_candidate_ids": [
+        "H0WA10034"
+      ],
+      "source_url": "https://clerk.house.gov/Members/S001159"
+    }
+  ]
 }

@@ -8,8 +8,15 @@ from fastapi.responses import HTMLResponse
 
 from ..db import conn
 from ..money.clean import slug_to_key
+from . import fec_queries as F
 from . import money_queries as M
 
+FEC_VIEWS = {
+    "overview": "Overview",
+    "contributions": "Contributions",
+    "spending": "Spending",
+    "outside": "Outside money",
+}
 VIEWS = {
     "overview": "Overview",
     "contributions": "Contributions",
@@ -41,6 +48,29 @@ def _amount(value: str) -> float | None:
 
 def build_router(render: Callable) -> APIRouter:
     router = APIRouter()
+
+    def _federal(request, c, person, view, q, source, state, min_amount, category, sort, cycle, memo, page):
+        view = view if view in FEC_VIEWS else "overview"
+        pid = person["id"]
+        ctx: dict = {"counts": F.tab_counts(c, pid), "cycles": F.cycles(c, pid),
+                     "other_committees": F.other_committees(c, pid)}
+        ctx["cycle_years"] = sorted({k["cycle"] for k in ctx["cycles"]}, reverse=True)
+        y = _int(cycle)
+        if view == "contributions":
+            amount = _amount(min_amount)
+            ctx["listing"] = F.contributions(c, pid, cycle=y, source=source, state=state, q=q, min_amount=amount,
+                                             memo=memo == "1", sort=sort, page=page)
+            ctx["sources"] = F.source_types(c, pid)
+            narrowed = source or state or q or amount
+            ctx["individuals"] = [] if narrowed else F.top_individuals(c, pid, cycle=y)
+        elif view == "spending":
+            ctx["listing"] = F.spending(c, pid, cycle=y, category=category, q=q, sort=sort, page=page)
+        elif view == "outside":
+            ctx.update(F.outside(c, pid, page=page))
+        return render(request, "money_person_fec.html", p=person, view=view, VIEWS=FEC_VIEWS,
+                      noindex=view in ("contributions", "outside"),
+                      f=dict(cycle=cycle, source=source, state=state, q=q, min=min_amount, category=category,
+                             sort=sort, memo=memo), **ctx)
 
     @router.get("/money", response_class=HTMLResponse)
     def money_index(request: Request, group: str = "all", party: str = "", q: str = "", former: str = "",
@@ -74,7 +104,8 @@ def build_router(render: Callable) -> APIRouter:
     @router.get("/money/{person_id:int}", response_class=HTMLResponse)
     def money_person(request: Request, person_id: int, view: str = "overview", year: str = "", source: str = "",
                      state: str = "", q: str = "", min: str = "", donor: str = "", category: str = "",
-                     sort: str = "", statement: str = "", page: int = 1):
+                     sort: str = "", statement: str = "", cycle: str = "", memo: str = "", records: str = "",
+                     page: int = 1):
         view = view if view in VIEWS else "overview"
         y = _int(year)
         q = q.strip()[:100]
@@ -83,6 +114,8 @@ def build_router(render: Callable) -> APIRouter:
             person = M.get_person(c, person_id)
             if not person:
                 raise HTTPException(404)
+            if person["fec_candidate_ids"] and records != "state":
+                return _federal(request, c, person, view, q, source, state, min, category, sort, cycle, memo, _page(page))
             ctx["campaigns"] = M.campaigns(c, person_id)
             ctx["years"] = M.years(c, person_id)
             ctx["counts"] = M.tab_counts(c, person_id)

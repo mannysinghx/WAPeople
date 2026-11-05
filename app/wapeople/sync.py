@@ -8,6 +8,7 @@
   python -m wapeople.sync summaries --all    # staff bill summaries (also part of each legislature sync)
   python -m wapeople.sync link               # re-link court cases to bills
   python -m wapeople.sync money [--full]     # elected officials' campaign money from the PDC
+  python -m wapeople.sync fec [--full]       # members of Congress, from the FEC's public bulk files
   python -m wapeople.sync schedule           # long-running: resume any incomplete load, then refresh daily
   python -m wapeople.sync daily              # one cycle of the above, then exit (cron jobs, e.g. Railway)
 """
@@ -26,6 +27,7 @@ from .db import connect
 from .legislature.summaries import SummarySync
 from .legislature.sync import LegislatureSync, all_bienniums, window
 from .migrate import migrate
+from .money.fec import FecSync
 from .money.sync import MoneySync
 from .runs import tracked_run
 
@@ -104,6 +106,15 @@ def link() -> None:
         stats.update(CourtSync(conn).extract_and_link())
 
 
+def sync_fec(full: bool = False) -> None:
+    with connect() as conn, tracked_run("fec", "full" if full else "refresh") as stats:
+        fs = FecSync(conn)
+        try:
+            stats.update(fs.run(full=full))
+        finally:
+            fs.close()
+
+
 def sync_money(full: bool = False) -> None:
     with connect() as conn, tracked_run("money", "full" if full else "refresh") as stats:
         ms = MoneySync(conn)
@@ -170,6 +181,7 @@ def refresh(today: date | None = None) -> None:
         ("prefiled", sync_upcoming),
         ("courts", courts_refresh),
         ("money", sync_money),
+        ("fec", sync_fec),
         ("contact", contact_retry),
     ):
         try:
@@ -238,6 +250,8 @@ def main() -> None:
     sub.add_parser("migrate")
     mp = sub.add_parser("money")
     mp.add_argument("--full", action="store_true", help="reload every campaign, not just those that differ")
+    fp = sub.add_parser("fec")
+    fp.add_argument("--full", action="store_true", help="reload every file, even if unchanged")
     lp = sub.add_parser("legislature")
     lp.add_argument("--biennium", action="append", default=[])
     lp.add_argument("--all", action="store_true")
@@ -268,6 +282,9 @@ def main() -> None:
     elif a.cmd == "money":
         migrate()
         sync_money(full=a.full)
+    elif a.cmd == "fec":
+        migrate()
+        sync_fec(full=a.full)
     elif a.cmd == "legislature":
         migrate()
         targets = all_bienniums() if a.all else a.biennium

@@ -104,6 +104,17 @@ def range_label(s: str | None) -> str:
     return f"${int(s):,}" if s.isdigit() else s
 
 
+def fec_committee_link(row: dict) -> str:
+    return f"https://www.fec.gov/data/committee/{row['other_id']}/"
+
+
+def election_label(code: str | None) -> str:
+    """FEC election codes such as P2024 and G2022."""
+    names = {"P": "primary", "G": "general", "R": "runoff", "S": "special", "C": "convention", "O": "other"}
+    code = (code or "").strip()
+    return f"{code[1:]} {names[code[0]]}".strip() if code[:1] in names else code
+
+
 def org_link(row: dict) -> str:
     return f"/money/organizations/{key_to_slug(row['key'])}"
 
@@ -164,6 +175,7 @@ templates.env.filters["office_label"] = office_label
 templates.env.filters["position_label"] = position_label
 templates.env.filters["range_label"] = range_label
 templates.env.filters["org_slug"] = key_to_slug
+templates.env.filters["election_label"] = election_label
 templates.env.filters["biennium"] = biennium_label
 templates.env.filters["motion"] = motion_label
 templates.env.filters["first_bullet"] = lambda s: (s or "").split("\n", 1)[0]
@@ -172,7 +184,7 @@ templates.env.globals.update(
     bill_url=bill_url, qs=qs, leg_url=leg_url, PARTY_NAMES=PARTY_NAMES, STAGE_TONE=STAGE_TONE,
     STAGES=STAGES, CATEGORIES=CATEGORIES, TYPE_NAMES=TYPE_NAMES, TYPE_FILTERS=Q.TYPE_FILTERS,
     STAGE_FILTERS=Q.STAGE_FILTERS, BUCKETS=Q.BUCKETS, session_law_text=session_law_text,
-    base_id=base_bill_id, org_link=org_link,
+    base_id=base_bill_id, org_link=org_link, fec_committee_link=fec_committee_link,
 )
 
 
@@ -562,7 +574,8 @@ def sitemap_part(request: Request, name: str):
             paths = list(SITEMAP_PAGES)
         elif name == "people":
             paths = [f"/legislators/{r['id']}" for r in c.execute("SELECT id FROM members ORDER BY id")]
-            paths += [f"/money/{r['id']}" for r in c.execute("SELECT id FROM money_people WHERE n_campaigns > 0 ORDER BY id")]
+            paths += [f"/money/{r['id']}" for r in c.execute(
+                "SELECT id FROM money_people WHERE n_campaigns > 0 OR fed_cycles > 0 ORDER BY id")]
             paths += [f"/money/organizations/{key_to_slug(r['key'])}"
                       for r in c.execute("SELECT key FROM money_orgs ORDER BY total DESC LIMIT 20000")]
         elif name == "court":

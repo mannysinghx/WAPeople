@@ -49,8 +49,9 @@ def place(value) -> str | None:
 
 
 def zip_code(value) -> str | None:
+    """Five digits only: a nine-digit ZIP can point to a single building."""
     s = text(value)
-    return s if s and re.fullmatch(r"\d{5}(-?\d{4})?", s) else None
+    return s[:5] if s and re.fullmatch(r"\d{5}(-?\d{4})?", s) else None
 
 
 def employer(value) -> str | None:
