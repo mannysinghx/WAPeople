@@ -18,6 +18,15 @@
 </section>
 {% endif %}
 
+{% if orgs %}
+<section style="margin-bottom:1.5rem">
+  <h2>Organizations that gave to officials</h2>
+  <div class="chips">
+    {% for o in orgs %}<a class="chip" href="/money/organizations/{{ o.key | org_slug }}"><strong>{{ o.name }}</strong> <span class="small muted">{{ o.total | usd }}</span></a>{% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <section style="margin-bottom:1.5rem">
   <div class="panel-head"><h2>Bills <span class="muted small">{{ "{:,}".format(bills.total) }}</span></h2>
     {% if bills.total > bills.items | length %}<a href="/bills?q={{ q | urlencode }}&type=all">See all {{ "{:,}".format(bills.total) }} →</a>{% endif %}</div>

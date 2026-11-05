@@ -41,6 +41,7 @@
 <nav class="tabs" aria-label="Record">
   <a href="?tab=votes"{% if tab == "votes" %} aria-current="page"{% endif %}>Voting record</a>
   <a href="?tab=bills"{% if tab == "bills" %} aria-current="page"{% endif %}>Sponsored &amp; co-sponsored bills</a>
+  {% if money %}<a href="/money/{{ money.id }}">Money trail{% if money.total_raised %} <span class="count">{{ money.total_raised | usd_short }} raised</span>{% endif %} →</a>{% endif %}
 </nav>
 
 <form class="filters" method="get">
@@ -100,5 +101,5 @@
   {{ pager(listing, request) }}
   {% else %}<div class="card empty"><p>No recorded votes match.</p></div>{% endif %}
 {% endif %}
-<p class="small muted" style="margin-top:1.5rem"><a href="/contact?topic=correction&amp;page={{ path | urlencode }}">Report wrong or missing information on this page</a></p>
+<p class="small muted" style="margin-top:1.5rem"><a href="/contact?topic=correction&amp;page={{ path | urlencode }}" rel="nofollow">Report wrong or missing information on this page</a></p>
 {% endblock %}

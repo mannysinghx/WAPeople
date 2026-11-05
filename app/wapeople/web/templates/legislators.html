@@ -41,7 +41,8 @@
 
 {% set senate = members | selectattr("agency", "equalto", "Senate") | list %}
 {% set house = members | selectattr("agency", "equalto", "House") | list %}
-<p class="result-meta">{{ members | length }} members · Senate {{ senate | length }} ({{ senate | selectattr("party", "equalto", "D") | list | length }} D, {{ senate | selectattr("party", "equalto", "R") | list | length }} R) · House {{ house | length }} ({{ house | selectattr("party", "equalto", "D") | list | length }} D, {{ house | selectattr("party", "equalto", "R") | list | length }} R)</p>
+{% set left = members | selectattr("left_early") | list %}
+<p class="result-meta">{{ members | length }} members{% if left %} ({{ left | length }} left during the term and {{ "was" if left | length == 1 else "were" }} replaced){% endif %} · Senate {{ senate | length }} ({{ senate | selectattr("party", "equalto", "D") | list | length }} D, {{ senate | selectattr("party", "equalto", "R") | list | length }} R) · House {{ house | length }} ({{ house | selectattr("party", "equalto", "D") | list | length }} D, {{ house | selectattr("party", "equalto", "R") | list | length }} R)</p>
 
 {% if members %}
 <div class="table-wrap">
@@ -50,7 +51,7 @@
   <tbody>
   {% for m in members %}
     <tr>
-      <td><a href="/legislators/{{ m.id }}"><strong>{{ m.name }}</strong></a></td>
+      <td><a href="/legislators/{{ m.id }}"><strong>{{ m.name }}</strong></a>{% if m.left_early %} <span class="badge tone-muted">Left during term</span>{% endif %}</td>
       <td data-label="Chamber">{{ m.agency }}</td>
       <td data-label="Party">{{ party(m.party, True) }}</td>
       <td data-label="District">{{ m.district }}</td>

@@ -310,3 +310,27 @@ details.voters summary { cursor: pointer; font-weight: 700; color: var(--link); 
 .legal-summary { margin: 1rem 0 1.5rem; }
 .legal-summary h2 { margin-top: 0; }
 .legal-summary ul { margin-bottom: 0; }
+
+/* Money trails: charts use one hue per job (series 1 = money in, series 2 = money out). */
+:root { --series-1: #2a78d6; --series-2: #eb6834; }
+@media (prefers-color-scheme: dark) { :root { --series-1: #3987e5; --series-2: #d95926; } }
+.hbars { list-style: none; margin: 0; padding: 0; display: grid; gap: .55rem; }
+.hbars li { display: grid; grid-template-columns: minmax(0, 11rem) minmax(3rem, 1fr) auto; gap: .6rem; align-items: center; font-size: .9rem; }
+.hbar-label { overflow-wrap: anywhere; line-height: 1.25; }
+.hbar-track { display: block; height: 14px; }
+.hbar-fill { display: block; height: 100%; min-width: 2px; border-radius: 0 4px 4px 0; }
+.series-1 .hbar-fill { background: var(--series-1); }
+.series-2 .hbar-fill { background: var(--series-2); }
+.hbar-value { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+@media (max-width: 520px) { .hbars li { grid-template-columns: minmax(0, 1fr) auto; } .hbar-track { grid-column: 1 / -1; grid-row: 2; } }
+.rtable .num { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .rtable .num { text-align: left; } }
+.trail { display: flex; flex-wrap: wrap; align-items: stretch; gap: .6rem; margin-top: 1rem; }
+.trail-step { flex: 1 1 130px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .8rem 1rem; }
+.trail-step .n { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.trail-step .l { color: var(--muted); font-size: .85rem; }
+.trail-arrow { align-self: center; color: var(--muted); font-size: 1.3rem; }
+@media (max-width: 620px) { .trail-arrow { display: none; } }
+.stat .card-link { border: 0; padding: 0; }
+.source-note { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.source-note p { margin: 0 0 .4rem; }

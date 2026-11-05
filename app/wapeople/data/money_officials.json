@@ -1,0 +1,28 @@
+{
+  "as_of": "2026-11-05",
+  "note": "Statewide officials and Supreme Court justices holding office on as_of. Legislators come from the Legislature's roster and need no entry here. person_id is the Public Disclosure Commission's id. Winners of the November 3, 2026 election take office in January 2027: update this list then.",
+  "officials": [
+    {"person_id": 1108, "name": "Bob Ferguson", "title": "Governor", "kind": "statewide", "source_url": "https://governor.wa.gov/"},
+    {"person_id": 27461, "name": "Denny Heck", "title": "Lieutenant Governor", "kind": "statewide", "source_url": "https://ltgov.wa.gov/"},
+    {"person_id": 206, "name": "Steve Hobbs", "title": "Secretary of State", "kind": "statewide", "source_url": "https://www.sos.wa.gov/"},
+    {"person_id": 25657, "name": "Mike Pellicciotti", "title": "State Treasurer", "kind": "statewide", "source_url": "https://tre.wa.gov/"},
+    {"person_id": 1082, "name": "Pat McCarthy", "title": "State Auditor", "kind": "statewide", "source_url": "https://sao.wa.gov/"},
+    {"person_id": 49014, "name": "Nick Brown", "title": "Attorney General", "kind": "statewide", "source_url": "https://www.atg.wa.gov/"},
+    {"person_id": 1057, "name": "Dave Upthegrove", "title": "Commissioner of Public Lands", "kind": "statewide", "source_url": "https://www.dnr.wa.gov/"},
+    {"person_id": 1070, "name": "Chris Reykdal", "title": "Superintendent of Public Instruction", "kind": "statewide", "source_url": "https://ospi.k12.wa.us/"},
+    {"person_id": 25512, "name": "Patty Kuderer", "title": "Insurance Commissioner", "kind": "statewide", "source_url": "https://www.insurance.wa.gov/"},
+    {"person_id": 1121, "name": "Debra L. Stephens", "title": "Chief Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
+    {"person_id": 6352, "name": "Charles W. Johnson", "title": "Associate Chief Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
+    {"person_id": 483, "name": "Steven C. González", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
+    {"person_id": 226, "name": "Sheryl Gordon McCloud", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
+    {"person_id": 4139, "name": "Raquel Montoya-Lewis", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
+    {"person_id": 29919, "name": "G. Helen Whitener", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
+    {"person_id": 38253, "name": "Salvador A. Mungia", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
+    {"person_id": 55396, "name": "Colleen Melody", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"},
+    {"person_id": 56177, "name": "Theodore J. Angelis", "title": "Justice, Washington Supreme Court", "kind": "justice", "source_url": "https://www.courts.wa.gov/court_dir/orgs/112.html"}
+  ],
+  "manual_links": {
+    "17204": {"person_ids": [4015], "note": "J.D. Rossetti files with the PDC as Justin Rossetti (same district and chamber)."},
+    "18701": {"person_ids": [182], "note": "Douglas Roulstone (same name and district; his only PDC campaign is a later Senate run)."}
+  }
+}

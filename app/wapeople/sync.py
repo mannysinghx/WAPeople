@@ -7,6 +7,7 @@
   python -m wapeople.sync courts [--since 2020-01-01] [--no-text]
   python -m wapeople.sync summaries --all    # staff bill summaries (also part of each legislature sync)
   python -m wapeople.sync link               # re-link court cases to bills
+  python -m wapeople.sync money [--full]     # elected officials' campaign money from the PDC
   python -m wapeople.sync schedule           # long-running: resume any incomplete load, then refresh daily
   python -m wapeople.sync daily              # one cycle of the above, then exit (cron jobs, e.g. Railway)
 """
@@ -19,12 +20,13 @@ from datetime import date, datetime
 
 from .config import SYNC_HOUR_LOCAL
 from .contact import apply_retention, send_pending
-from .courts.client import RateLimited
+from .courts.client import AuthRequired, RateLimited
 from .courts.sync import CourtSync
 from .db import connect
 from .legislature.summaries import SummarySync
 from .legislature.sync import LegislatureSync, all_bienniums, window
 from .migrate import migrate
+from .money.sync import MoneySync
 from .runs import tracked_run
 
 log = logging.getLogger("wapeople.sync")
@@ -47,6 +49,7 @@ def sync_legislature(bienniums: list[str], details: bool = True, force_details: 
                                                force_details=force_details))
                 if summaries:
                     stats.update(sums.sync(b))
+        leg.repair_members()
         sums.close()
         leg.client.close()
 
@@ -101,6 +104,15 @@ def link() -> None:
         stats.update(CourtSync(conn).extract_and_link())
 
 
+def sync_money(full: bool = False) -> None:
+    with connect() as conn, tracked_run("money", "full" if full else "refresh") as stats:
+        ms = MoneySync(conn)
+        try:
+            stats.update(ms.run(full=full))
+        finally:
+            ms.close()
+
+
 def incomplete_bienniums() -> list[str]:
     with connect() as conn:
         done = {
@@ -149,15 +161,22 @@ def refresh(today: date | None = None) -> None:
         with connect() as conn, tracked_run("contact", "deliver") as stats:
             stats.update(send_pending(conn))
             stats.update(apply_retention(conn))
+            if stats.get("contact_failed"):
+                # Recorded as an error: a contact form that can't deliver must not look healthy.
+                raise RuntimeError(f"{stats['contact_failed']} contact message(s) could not be emailed")
 
     for name, step in (
         ("legislature", lambda: sync_legislature(targets, scope="refresh")),
         ("prefiled", sync_upcoming),
         ("courts", courts_refresh),
+        ("money", sync_money),
         ("contact", contact_retry),
     ):
         try:
             step()
+        except AuthRequired as e:
+            log.error("refresh step %s skipped: %s", name, e)
+            failed.append(name)
         except Exception:
             log.exception("refresh step %s failed", name)
             failed.append(name)
@@ -217,6 +236,8 @@ def main() -> None:
     sub.add_parser("daily")
     sub.add_parser("link")
     sub.add_parser("migrate")
+    mp = sub.add_parser("money")
+    mp.add_argument("--full", action="store_true", help="reload every campaign, not just those that differ")
     lp = sub.add_parser("legislature")
     lp.add_argument("--biennium", action="append", default=[])
     lp.add_argument("--all", action="store_true")
@@ -244,6 +265,9 @@ def main() -> None:
         schedule()
     elif a.cmd == "link":
         link()
+    elif a.cmd == "money":
+        migrate()
+        sync_money(full=a.full)
     elif a.cmd == "legislature":
         migrate()
         targets = all_bienniums() if a.all else a.biennium

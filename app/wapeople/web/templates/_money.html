@@ -1,0 +1,21 @@
+{# Ranked one-hue bars: largest first, value printed at the end of each row. series 1 = money in, 2 = money out. #}
+{% macro hbars(rows, label_key, series=1, limit=12, link=None) -%}
+{% set shown = rows[:limit] %}
+{% set top = (shown | map(attribute="total") | max) if shown else 0 %}
+<ul class="hbars series-{{ series }}">
+  {% for r in shown %}
+  <li title="{{ r[label_key] }}: {{ r.total | usd }}{% if r.n %} across {{ '{:,}'.format(r.n) }} record{{ '' if r.n == 1 else 's' }}{% endif %}">
+    <span class="hbar-label">{% if link %}<a href="{{ link(r) }}">{{ r[label_key] }}</a>{% else %}{{ r[label_key] }}{% endif %}</span>
+    <span class="hbar-track" aria-hidden="true">{% if top > 0 and r.total > 0 %}<span class="hbar-fill" style="width:{{ (100 * r.total / top) | round(1) }}%"></span>{% endif %}</span>
+    <span class="hbar-value">{{ r.total | usd }}</span>
+  </li>
+  {% endfor %}
+</ul>
+{%- endmacro %}
+
+{% macro source_note() -%}
+<div class="source-note small muted">
+  <p><strong>A contribution is not an accusation.</strong> These are campaign finance reports as filed with the Washington Public Disclosure Commission. They show who gave and how much. They don't show that anyone received anything in return.</p>
+  <p>Condition of release, from the PDC: this data constitutes a list of individuals and may not be used for commercial purposes (<a href="https://app.leg.wa.gov/rcw/default.aspx?cite=42.56.070" rel="noopener">RCW 42.56.070</a>). <a href="/about#money">How this data works</a> · <a href="/contact?topic=correction&amp;page={{ path | urlencode }}" rel="nofollow">Report a mistake</a></p>
+</div>
+{%- endmacro %}

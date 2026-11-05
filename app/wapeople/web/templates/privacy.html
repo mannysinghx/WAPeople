@@ -25,7 +25,7 @@
 
 <h3>When you use the contact form</h3>
 <p>We store what you choose to send: the topic, the page you mention, your message, and your name and email address if you give them (both optional). To stop spam, we also store a one-way, keyed scramble ("hash") of your IP address. It can't be turned back into your address, and we erase it after {{ hash_days }} days.</p>
-<p>Your message is saved in our database and delivered to the site's private email inbox, which is hosted by an email provider. We use your email address only to reply to you. We never add it to a mailing list, publish it, or share it. Messages are deleted automatically after {{ (retention_days / 365) | round | int }} years, or sooner if you ask.</p>
+<p>Your message is saved in our database and delivered to the site's private email inbox, which is hosted by an email provider. Messages that look like automated sales pitches or link spam are kept in the database but not emailed. We use your email address only to reply to you. We never add it to a mailing list, publish it, or share it. Messages are deleted automatically after {{ (retention_days / 365) | round | int }} years, or sooner if you ask.</p>
 
 <h3>"Find my district" on the map</h3>
 <p>If you press <strong>Find my district</strong>, your browser asks your permission to share your location. If you allow it, the district is worked out on your own device. Your location is never sent to WA People or stored anywhere.</p>
@@ -43,6 +43,9 @@
 
 <h2>Public records on this site</h2>
 <p>Legislators' names, parties, districts, sponsorships, and votes are public records published by the Washington State Legislature. Court decisions are public records published by the courts. WA People republishes these records to inform the public. They're not information we collect from visitors.</p>
+
+<h3>Donors and financial statements</h3>
+<p>Campaign contributions and officials' financial statements are public records published by the Washington Public Disclosure Commission. That means people who gave to a campaign can appear on this site with their name, city, state, ZIP code, employer, and occupation, as the law requires campaigns to report. We limit how far that goes: we don't copy street addresses, phone numbers, or email addresses, and we remove street addresses that filers typed into other fields; we leave out home addresses and family members' names from financial statements; and we ask search engines not to index pages that list individual donors. For a correction, please <a href="/contact?topic=correction">contact us</a>. Changes to the official record have to be made with the campaign or the PDC.</p>
 
 <h2>Who else sees information</h2>
 <p>Only the service providers we need to run the site, and only for that purpose: our hosting provider (which runs the website and database) and our email provider (which delivers contact-form messages to us). We may also disclose information if the law requires it.</p>

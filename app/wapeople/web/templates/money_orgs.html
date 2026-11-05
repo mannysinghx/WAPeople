@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_money.html" import source_note with context %}
+{% from "_macros.html" import pager %}
+{% block title %}Organizations that fund Washington's elected officials{% endblock %}
+{% block description %}Businesses, unions, PACs, parties and other organizations that gave to Washington State elected officials, and who they gave to.{% endblock %}
+{% block content %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/money">Money trails</a> › Organizations</nav>
+<h1>Organizations that gave</h1>
+<p class="muted">Businesses, unions, political committees, parties and others, ranked by what they gave to the officials on this site. Names are grouped when they differ only by capitalization, punctuation, or a common abbreviation such as WA or PAC, so an organization can still appear under more than one spelling.</p>
+<form class="filters" method="get">
+  <div class="wide"><label for="o-q">Organization</label><input id="o-q" type="search" name="q" value="{{ f.q }}" placeholder="e.g. Boeing, union, realtors"></div>
+  <div><label for="o-t">Type</label>
+    <select id="o-t" name="source"><option value="">Any type</option>{% for t in types %}<option{% if f.source == t %} selected{% endif %}>{{ t }}</option>{% endfor %}</select>
+  </div>
+  <div class="actions"><button class="btn" type="submit">Apply</button></div>
+</form>
+<p class="result-meta">{{ "{:,}".format(result.total) }} organization{{ "" if result.total == 1 else "s" }}</p>
+{% if result.items %}
+<div class="table-wrap">
+<table class="rtable">
+  <thead><tr><th scope="col">Organization</th><th scope="col">Type</th><th scope="col" class="num">Gave</th><th scope="col" class="num">To how many officials</th><th scope="col">Latest gift</th></tr></thead>
+  <tbody>
+  {% for o in result.items %}
+  <tr>
+    <td class="desc"><a href="/money/organizations/{{ o.key | org_slug }}"><strong>{{ o.name }}</strong></a></td>
+    <td data-label="Type">{{ o.source_type }}</td>
+    <td data-label="Gave" class="num">{{ o.total | usd }}</td>
+    <td data-label="Officials" class="num">{{ o.n_people }}</td>
+    <td data-label="Latest gift" class="nowrap">{{ o.last_date | date }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{{ pager(result, request) }}
+{% else %}
+<div class="card empty"><h2>No organizations match</h2></div>
+{% endif %}
+{{ source_note() }}
+{% endblock %}

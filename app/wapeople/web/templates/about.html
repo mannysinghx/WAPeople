@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}About the data{% endblock %}
+{% block title %}About us and the data{% endblock %}
 {% block content %}
 <div class="prose">
 <h1>About us</h1>
@@ -12,6 +12,7 @@
   <li><strong>How every legislator voted</strong>, on every recorded vote, with dates.</li>
   <li><strong>Who represents you</strong>, on a map of all 49 legislative districts.</li>
   <li><strong>What the courts said</strong>: Washington Supreme Court decisions about laws and public policy.</li>
+  <li><strong>Who funds them</strong>: <a href="/money">money trails</a> for every legislator, statewide official and Supreme Court justice: how much they raised, who gave it, where it came from, and where it went.</li>
 </ul>
 <p>We believe an informed public makes for better government. WA People is <strong>nonpartisan</strong>: it doesn't endorse candidates, parties, or positions, and it reports the official record as it is. It's <strong>free</strong>, has <strong>no ads and no tracking</strong>, and is built entirely with open-source software and public data. It updates itself every day.</p>
 <p>See something wrong, or have an idea? <a href="/contact">Contact us</a>. Corrections help everyone.</p>
@@ -23,6 +24,7 @@
 <ul>
   <li><strong>Bills, sponsors, history and votes:</strong> the Washington State Legislature's public <a href="https://wslwebservices.leg.wa.gov/">web services</a>, the same data behind <a href="https://app.leg.wa.gov/">app.leg.wa.gov</a>.</li>
   <li><strong>Supreme Court decisions:</strong> <a href="https://www.courtlistener.com/">CourtListener</a>, the free legal archive run by the nonprofit Free Law Project. Full opinion text comes from the official PDFs published by the <a href="https://www.courts.wa.gov/opinions/">Washington Courts</a>.</li>
+  <li><strong>Campaign money and financial statements:</strong> the <a href="https://www.pdc.wa.gov/">Washington Public Disclosure Commission</a>'s open data on <a href="https://data.wa.gov/">data.wa.gov</a>.</li>
 </ul>
 <p>This is not an official government website. For anything that matters legally, check the official bill page or the opinion itself. Every page here links to its official source.</p>
 
@@ -48,8 +50,23 @@
 </ul>
 <p>Attorney and judicial discipline cases are left out. When an opinion cites a session law (“Laws of 2021, ch. 196”), it is linked to the exact bill that became that chapter. When it names a bill with a year next to it (“ESSB 5096 … 2021”), it is linked by number and session. References without a year are listed but not linked, because the same bill number is reused every session.</p>
 
+<h2 id="money">How the money trails work</h2>
+<p>Candidates in Washington must report the money they raise and spend to the Public Disclosure Commission (PDC). WA People loads those reports for each person who holds a state legislative seat, a statewide office, or a seat on the Supreme Court, plus former legislators. It covers every Washington campaign in the PDC's records for that person, not only the race for their current office. Each record links to the report it came from.</p>
+<ul>
+  <li><strong>Who is included:</strong> legislators come from the Legislature's roster. Statewide officials and justices are on a list checked against the <a href="https://www.courts.wa.gov/court_dir/orgs/112.html">Court Directory</a> and PDC election results. Federal officeholders report to the Federal Election Commission instead and aren't included, nor are county and city officials.</li>
+  <li><strong>How people are matched:</strong> a legislator is linked to PDC records only when the last name, the first name and a campaign for the same seat at the right time all agree. When they don't, we show no records instead of guessing. A few are linked by hand, with a note on the page.</li>
+  <li><strong>How far back it goes:</strong> the PDC's electronic candidate records begin with the 2009–10 election cycle, so earlier careers don't appear. Campaigns that use the PDC's "mini reporting" option file no itemized records, only a total.</li>
+  <li><strong>How donors are grouped:</strong> "where it came from" uses the category each filer reported. Organization names are grouped when they differ only by capitalization, punctuation, or a fixed list of abbreviations (WA, PAC, Assn., and shorthand for the main party and caucus committees), so one organization can still appear under several spellings. Small gifts that campaigns may report as a lump sum have no name or location. "Miscellaneous receipts" aren't gifts: they're often money moved from the candidate's earlier campaign or surplus account, which then counts again in the campaign that receives it. An individual's employer shows where they work; the employer didn't give that money.</li>
+  <li><strong>Spending categories:</strong> newer reports include a category. For older ones, a small set of plain keyword rules reads the filer's description, and anything those rules don't clearly recognize is shown as "not categorized."</li>
+  <li><strong>The next step back:</strong> when a donor's name matches a registered political committee by those same rules, its page shows who funds that committee. Names that don't match aren't guessed at, so this trail can stop short.</li>
+  <li><strong>Checking the totals:</strong> every day each campaign's count and total of records are compared with the PDC's own, and any campaign that differs is reloaded. Reports can be amended, so figures can change after a filing.</li>
+  <li><strong>What we leave out on purpose:</strong> street addresses, phone numbers and emails, which the source publishes, aren't copied here. Personal financial statements omit home addresses, family members' names, and anything reported only for a dependent. Individual donors' listings are kept out of search engines. The official filings at the PDC have the complete record.</li>
+</ul>
+<p><strong>A contribution isn't an accusation.</strong> These records show who gave money, not that anyone received anything in return. WA People doesn't connect donations to votes or draw conclusions from them.</p>
+<p class="small muted">Condition of release, from the PDC: this data constitutes a list of individuals and may not be used for commercial purposes (RCW 42.56.070(9) and AGO 1975 No. 15). WA People is free and has no ads or sponsors.</p>
+
 <h2 id="freshness">Freshness</h2>
-<p>The current session and new court decisions are refreshed every morning. Past sessions don't change.</p>
+<p>The current session, new court decisions and campaign money are refreshed every morning. Past sessions don't change.{% if updated.get("courts") %} Court decisions were last refreshed {{ updated["courts"] | date }}{% if updated.get("money") %}, campaign money {{ updated["money"] | date }}{% endif %}.{% endif %}</p>
 <div class="table-wrap" style="margin-top:.5rem">
 <table class="rtable">
   <thead><tr><th scope="col">Session</th><th scope="col">State</th><th scope="col">Last legislative activity</th><th scope="col">Last refreshed</th></tr></thead>

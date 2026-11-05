@@ -20,6 +20,7 @@ x-app-env: &app-env
   SMTP_USER: ${SMTP_USER:-}
   SMTP_PASSWORD: ${SMTP_PASSWORD:-}
   SITE_URL: ${SITE_URL:-}
+  SOCRATA_APP_TOKEN: ${SOCRATA_APP_TOKEN:-}
   TZ: America/Los_Angeles
 
 services:

@@ -1,0 +1,400 @@
+{% extends "base.html" %}
+{% from "_macros.html" import party, pager %}
+{% from "_money.html" import hbars, source_note with context %}
+{% block title %}{{ p.name }}: money trail{% endblock %}
+{% block description %}{{ p.name }} ({{ p.title }}): {{ p.total_raised | usd }} raised across {{ p.n_campaigns }} campaign{{ "" if p.n_campaigns == 1 else "s" }} on record. Who gave, where it came from, and where it went.{% endblock %}
+{% block robots %}{% if noindex %}<meta name="robots" content="noindex">{% endif %}{% endblock %}
+{% block content %}
+{% set roll = p.rollup or {} %}
+{% set surplus_balance = surplus_accounts | map(attribute="balance") | select | sum %}
+{% set surplus_spent = surplus_accounts | map(attribute="spent") | select | sum %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/money">Money trails</a> › {{ p.name }}</nav>
+<section class="card">
+  <div class="member-head">
+    <div class="avatar{% if p.party in ('D','R') %} party-{{ p.party }}{% endif %}" aria-hidden="true">{{ p.name[:1] }}{{ p.name.split(' ')[-1][:1] }}</div>
+    <div>
+      <h1 style="margin:0">{{ p.name }}</h1>
+      <div class="muted">{{ p.title }}{% if p.party in ("D", "R") %} · {{ party(p.party, True) }}{% endif %}{% if p.first_year %} · records {{ p.first_year }}{% if p.last_year != p.first_year %}–{{ p.last_year }}{% endif %}{% endif %}</div>
+      <div class="small" style="margin-top:.25rem">
+        {% if p.member_id %}<a href="/legislators/{{ p.member_id }}">Voting record and bills</a>{% endif %}
+        {% if p.source_url %}{% if p.member_id %} · {% endif %}<a href="{{ p.source_url }}" rel="noopener">Official site ↗</a>{% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+
+{% if not p.n_campaigns %}
+<div class="card empty" style="margin-top:1rem">
+  <h2>No campaign records on file</h2>
+  <p>The Public Disclosure Commission's electronic records don't show a campaign for {{ p.name }}. They begin with the 2009–10 election cycle, so people who last ran before then, and appointees who never ran, won't appear. Older paper filings can be requested from the <a href="https://www.pdc.wa.gov/" rel="noopener">PDC</a>.</p>
+</div>
+{% else %}
+
+<section class="trail" aria-label="The money trail in brief">
+  <div class="trail-step"><div class="n">{{ p.total_raised | usd_short }}</div><div class="l">Raised</div></div>
+  <div class="trail-arrow" aria-hidden="true">→</div>
+  <div class="trail-step"><div class="n">{{ p.total_spent | usd_short }}</div><div class="l">Spent by campaigns</div></div>
+  {% if surplus_spent %}
+  <div class="trail-arrow" aria-hidden="true">→</div>
+  <div class="trail-step"><div class="n">{{ surplus_spent | usd_short }}</div><div class="l">Moved out of surplus funds</div></div>
+  {% endif %}
+  <div class="trail-step trail-side"><div class="n">{% if p.in_state + p.out_of_state > 0 %}{{ (100 * p.in_state / (p.in_state + p.out_of_state)) | round | int }}%{% else %}—{% endif %}</div><div class="l">From Washington</div></div>
+</section>
+
+<nav class="tabs" aria-label="Money records">
+  {% set tab_n = {"contributions": p.n_contributions, "spending": counts.spending, "debts": counts.debts, "outside": counts.outside, "surplus": counts.surplus, "disclosures": counts.disclosures} %}
+  {% for k, label in VIEWS.items() %}
+  <a href="?view={{ k }}"{% if view == k %} aria-current="page"{% endif %}>{{ label }}{% if tab_n.get(k) %} <span class="count">{{ "{:,}".format(tab_n[k]) }}</span>{% endif %}</a>
+  {% endfor %}
+</nav>
+
+{% if view == "overview" %}
+<div class="grid-2">
+  <section class="card">
+    <h2>Where the money came from</h2>
+    {% if roll.by_source %}{{ hbars(roll.by_source, "type", 1, link=None) }}{% else %}<p class="muted">No itemized contributions on record.</p>{% endif %}
+    {% set misc = roll.by_source | default([], true) | selectattr("type", "equalto", "Miscellaneous receipts") | list %}
+    {% if misc and misc[0].total > 0 %}<p class="small muted" style="margin:.75rem 0 0">Miscellaneous receipts aren't gifts. They're often the candidate's own money moving from an earlier campaign or surplus account, so it's counted again in the campaign that receives it, plus interest and refunds.</p>{% endif %}
+    <p class="small muted" style="margin:.75rem 0 0"><a href="?view=contributions">See every contribution →</a></p>
+  </section>
+  <section class="card">
+    <h2>Where the money went</h2>
+    {% if roll.by_spend %}{{ hbars(roll.by_spend, "category", 2) }}{% else %}<p class="muted">No itemized spending on record.</p>{% endif %}
+    <p class="small muted" style="margin:.75rem 0 0"><a href="?view=spending">See every expense →</a></p>
+  </section>
+</div>
+
+<section style="margin-top:1rem">
+  <h2>Campaigns</h2>
+  <div class="table-wrap">
+  <table class="rtable">
+    <thead><tr><th scope="col">Year</th><th scope="col">Race</th><th scope="col">Result</th><th scope="col" class="num">Raised</th><th scope="col" class="num">Spent</th><th scope="col" class="num">Debts</th><th scope="col" class="num">Outside for / against</th><th scope="col">Filing</th></tr></thead>
+    <tbody>
+    {% for k in campaigns %}
+    <tr>
+      <td><a href="?view=contributions&amp;year={{ k.election_year }}" rel="nofollow"><strong>{{ k.election_year }}</strong></a></td>
+      <td data-label="Race">{{ k.office | office_label }}{% if k.district %}, District {{ k.district }}{% endif %}{% if k.position %} <span class="muted small">({{ k.position | position_label }})</span>{% endif %}{% if k.reporting_option == "mini" %}<div class="small muted">Mini reporting: no itemized records</div>{% endif %}</td>
+      <td data-label="Result">{{ k.general_status or k.primary_status or "—" }}</td>
+      <td data-label="Raised" class="num">{{ k.contributions | usd_blank }}</td>
+      <td data-label="Spent" class="num">{{ k.expenditures | usd_blank }}</td>
+      <td data-label="Debts" class="num">{{ k.debts | usd_blank }}</td>
+      <td data-label="Outside" class="num">{{ k.ie_for | usd_blank }} / {{ k.ie_against | usd_blank }}</td>
+      <td data-label="Filing">{% if k.url %}<a href="{{ k.url }}" rel="noopener nofollow">PDC ↗</a>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<div class="grid-2" style="margin-top:1rem">
+  <section class="card">
+    <h2>Top organizations</h2>
+    {% if roll.top_orgs %}{{ hbars(roll.top_orgs, "name", 1, limit=15, link=org_link) }}{% else %}<p class="muted">None on record.</p>{% endif %}
+    <p class="small muted" style="margin:.75rem 0 0">Individual donors are listed under <a href="?view=contributions">Contributions</a>.</p>
+  </section>
+  <section class="card">
+    <h2>Where donors are</h2>
+    {% if roll.by_city %}<h3>Top cities</h3>{{ hbars(roll.by_city, "city", 1, limit=10) }}{% endif %}
+    {% if roll.by_state %}<h3 style="margin-top:1rem">Outside Washington</h3>{{ hbars(roll.by_state, "state", 1, limit=8) }}{% endif %}
+    {% if p.not_stated > 0 %}<p class="small muted" style="margin:.75rem 0 0">{{ p.not_stated | usd }} has no stated location, mostly small gifts that campaigns report as one lump sum.</p>{% endif %}
+  </section>
+</div>
+
+<div class="grid-2" style="margin-top:1rem">
+  <section class="card">
+    <h2>Donors' employers</h2>
+    {% if roll.top_employers %}{{ hbars(roll.top_employers, "employer", 1, limit=12) }}{% else %}<p class="muted">None on record.</p>{% endif %}
+    <p class="small muted" style="margin:.75rem 0 0">Employers are reported only for larger gifts from individuals, and the employer didn't give this money itself.</p>
+  </section>
+  <section class="card">
+    <h2>Who the campaigns paid</h2>
+    {% if roll.top_payees %}{{ hbars(roll.top_payees, "name", 2, limit=12) }}{% else %}<p class="muted">None on record.</p>{% endif %}
+  </section>
+</div>
+
+{% elif view == "contributions" %}
+<form class="filters" method="get">
+  <input type="hidden" name="view" value="contributions">
+  {% if f.donor %}<input type="hidden" name="donor" value="{{ f.donor }}">{% endif %}
+  <div class="wide"><label for="c-q">Donor, employer, occupation or city</label><input id="c-q" type="search" name="q" value="{{ f.q }}" placeholder="e.g. Boeing or Spokane"></div>
+  <div><label for="c-y">Election year</label><select id="c-y" name="year"><option value="">All years</option>{% for y in years %}<option{% if f.year == y | string %} selected{% endif %}>{{ y }}</option>{% endfor %}</select></div>
+  <div><label for="c-s">Type of donor</label><select id="c-s" name="source"><option value="">Any type</option>{% for s in roll.by_source or [] %}<option{% if f.source == s.type %} selected{% endif %}>{{ s.type }}</option>{% endfor %}</select></div>
+  <div><label for="c-w">From</label><select id="c-w" name="state">
+    <option value="">Anywhere</option>
+    <option value="WA"{% if f.state == "WA" %} selected{% endif %}>Washington</option>
+    <option value="OUT"{% if f.state == "OUT" %} selected{% endif %}>Outside Washington</option>
+    <option value="NONE"{% if f.state == "NONE" %} selected{% endif %}>Location not stated</option>
+  </select></div>
+  <div><label for="c-m">At least ($)</label><input id="c-m" type="number" min="0" step="1" name="min" value="{{ f.min }}"></div>
+  <div><label for="c-o">Sort</label><select id="c-o" name="sort">
+    <option value="recent"{% if f.sort == "recent" %} selected{% endif %}>Newest first</option>
+    <option value="largest"{% if f.sort == "largest" %} selected{% endif %}>Largest first</option>
+    <option value="oldest"{% if f.sort == "oldest" %} selected{% endif %}>Oldest first</option>
+  </select></div>
+  <div class="actions"><button class="btn" type="submit">Apply</button></div>
+</form>
+{% if f.donor %}<p class="banner small">Showing one donor only. <a href="?view=contributions">Show everyone →</a></p>{% endif %}
+{% if individuals %}
+<details class="card" style="margin-bottom:1rem">
+  <summary><strong>Top individual donors{% if f.year %} in {{ f.year }}{% endif %}</strong></summary>
+  <div class="table-wrap" style="margin-top:.75rem">
+  <table class="rtable">
+    <thead><tr><th scope="col">Donor</th><th scope="col">Employer and occupation</th><th scope="col">Place</th><th scope="col" class="num">Total</th><th scope="col" class="num">Gifts</th></tr></thead>
+    <tbody>
+    {% for d in individuals %}
+    <tr>
+      <td><a href="?view=contributions&amp;donor={{ d.key | urlencode }}" rel="nofollow">{{ d.name }}</a></td>
+      <td data-label="Employer">{{ d.employer or "—" }}{% if d.occupation %} <span class="muted small">({{ d.occupation }})</span>{% endif %}</td>
+      <td data-label="Place">{{ d.city or "" }}{% if d.city and d.state %}, {% endif %}{{ d.state or "" }}</td>
+      <td data-label="Total" class="num">{{ d.total | usd }}</td>
+      <td data-label="Gifts" class="num">{{ d.n }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</details>
+{% endif %}
+<p class="result-meta">{{ "{:,}".format(listing.total) }} contribution{{ "" if listing.total == 1 else "s" }} · {{ listing.extra.total | usd_cents }}</p>
+{% if listing.items %}
+<div class="table-wrap">
+<table class="rtable">
+  <thead><tr><th scope="col">Date</th><th scope="col">From</th><th scope="col">Place</th><th scope="col">Employer and occupation</th><th scope="col" class="num">Amount</th><th scope="col">Details</th><th scope="col">Report</th></tr></thead>
+  <tbody>
+  {% for x in listing.items %}
+  <tr>
+    <td class="nowrap">{{ x.receipt_date | date }}</td>
+    <td class="desc">{% if x.is_org and x.contributor_key %}<a href="/money/organizations/{{ x.contributor_key | org_slug }}"><strong>{{ x.contributor_name }}</strong></a>{% else %}<strong>{{ x.contributor_name }}</strong>{% endif %}<span class="sub">{{ x.source_type }}</span></td>
+    <td data-label="Place">{{ x.city or "" }}{% if x.city and x.state %}, {% endif %}{{ x.state or "" }}{% if x.zip %} {{ x.zip }}{% endif %}{% if not x.city and not x.state %}<span class="muted">Not stated</span>{% endif %}</td>
+    <td data-label="Employer">{{ x.employer or "—" }}{% if x.occupation %}<div class="muted small">{{ x.occupation }}</div>{% endif %}{% if x.employer_city %}<div class="muted small">{{ x.employer_city }}{% if x.employer_state %}, {{ x.employer_state }}{% endif %}</div>{% endif %}</td>
+    <td data-label="Amount" class="num"><strong>{{ x.amount | usd_cents }}</strong></td>
+    <td data-label="Details">{{ x.election_year }}{% if x.primary_general %} {{ x.primary_general | lower }}{% endif %}{% if x.cash_or_in_kind %}<div class="muted small">{{ x.cash_or_in_kind }}</div>{% endif %}{% if x.description %}<div class="muted small">{{ x.description }}</div>{% endif %}{% if x.memo %}<div class="muted small">{{ x.memo }}</div>{% endif %}</td>
+    <td data-label="Report">{% if x.url %}<a href="{{ x.url }}" rel="noopener nofollow">PDC ↗</a>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{{ pager(listing, request) }}
+{% else %}<div class="card empty"><p>No contributions match.</p></div>{% endif %}
+
+{% elif view == "spending" %}
+<form class="filters" method="get">
+  <input type="hidden" name="view" value="spending">
+  <div class="wide"><label for="s-q">Paid to, or purpose</label><input id="s-q" type="search" name="q" value="{{ f.q }}" placeholder="e.g. printing"></div>
+  <div><label for="s-y">Election year</label><select id="s-y" name="year"><option value="">All years</option>{% for y in years %}<option{% if f.year == y | string %} selected{% endif %}>{{ y }}</option>{% endfor %}</select></div>
+  <div><label for="s-c">Category</label><select id="s-c" name="category"><option value="">Any category</option>{% for s in roll.by_spend or [] %}<option{% if f.category == s.category %} selected{% endif %}>{{ s.category }}</option>{% endfor %}</select></div>
+  <div><label for="s-o">Sort</label><select id="s-o" name="sort">
+    <option value="recent"{% if f.sort == "recent" %} selected{% endif %}>Newest first</option>
+    <option value="largest"{% if f.sort == "largest" %} selected{% endif %}>Largest first</option>
+    <option value="oldest"{% if f.sort == "oldest" %} selected{% endif %}>Oldest first</option>
+  </select></div>
+  <div class="actions"><button class="btn" type="submit">Apply</button></div>
+</form>
+<p class="result-meta">{{ "{:,}".format(listing.total) }} expense{{ "" if listing.total == 1 else "s" }} · {{ listing.extra.total | usd_cents }}</p>
+{% if listing.items %}
+<div class="table-wrap">
+<table class="rtable">
+  <thead><tr><th scope="col">Date</th><th scope="col">Paid to</th><th scope="col">Place</th><th scope="col">For</th><th scope="col" class="num">Amount</th><th scope="col">Report</th></tr></thead>
+  <tbody>
+  {% for x in listing.items %}
+  <tr>
+    <td class="nowrap">{{ x.expenditure_date | date }}</td>
+    <td class="desc"><strong>{{ x.recipient_name or "Not itemized" }}</strong><span class="sub">{{ x.election_year }} campaign</span></td>
+    <td data-label="Place">{{ x.recipient_city or "" }}{% if x.recipient_city and x.recipient_state %}, {% endif %}{{ x.recipient_state or "" }}</td>
+    <td data-label="For">{{ x.category }}{% if x.description and x.description != x.category %}<div class="muted small">{{ x.description }}</div>{% endif %}</td>
+    <td data-label="Amount" class="num"><strong>{{ x.amount | usd_cents }}</strong></td>
+    <td data-label="Report">{% if x.url %}<a href="{{ x.url }}" rel="noopener nofollow">PDC ↗</a>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{{ pager(listing, request) }}
+{% else %}<div class="card empty"><p>No expenses match.</p></div>{% endif %}
+
+{% elif view == "debts" %}
+<h2>Loans</h2>
+{% if loans %}
+<div class="table-wrap"><table class="rtable">
+  <thead><tr><th scope="col">Date</th><th scope="col">Lender</th><th scope="col">Terms</th><th scope="col" class="num">Amount</th><th scope="col">Report</th></tr></thead>
+  <tbody>{% for x in loans %}
+  <tr>
+    <td class="nowrap">{{ x.receipt_date | date }}</td>
+    <td class="desc"><strong>{{ x.lender_name or "Not stated" }}</strong><span class="sub">{{ x.lender_or_endorser or "" }}{% if x.lender_city %} · {{ x.lender_city }}{% if x.lender_state %}, {{ x.lender_state }}{% endif %}{% endif %}{% if x.lender_employer %} · {{ x.lender_employer }}{% endif %}</span></td>
+    <td data-label="Terms">{{ x.transaction_type or "" }}{% if x.repayment_schedule %}<div class="muted small">{{ x.repayment_schedule }}</div>{% endif %}{% if x.loan_due_date %}<div class="muted small">Due {{ x.loan_due_date | date }}</div>{% endif %}</td>
+    <td data-label="Amount" class="num"><strong>{{ x.amount | usd_cents }}</strong></td>
+    <td data-label="Report">{% if x.url %}<a href="{{ x.url }}" rel="noopener nofollow">PDC ↗</a>{% endif %}</td>
+  </tr>{% endfor %}</tbody>
+</table></div>
+{% else %}<p class="muted">No loans reported.</p>{% endif %}
+<h2 style="margin-top:1.5rem">Debts</h2>
+{% if debts.items %}
+<p class="small muted">{{ "{:,}".format(debts.total) }} debt record{{ "" if debts.total == 1 else "s" }}. Each report restates what's still owed, so adding them up overstates the debt. The campaign's latest figure is on the Overview tab.</p>
+<div class="table-wrap"><table class="rtable">
+  <thead><tr><th scope="col">Date</th><th scope="col">Owed to</th><th scope="col">For</th><th scope="col" class="num">Amount</th><th scope="col">Report</th></tr></thead>
+  <tbody>{% for x in debts.items %}
+  <tr>
+    <td class="nowrap">{{ x.debt_date | date }}</td>
+    <td class="desc"><strong>{{ x.vendor_name or "Not stated" }}</strong>{% if x.vendor_city %}<span class="sub">{{ x.vendor_city }}{% if x.vendor_state %}, {{ x.vendor_state }}{% endif %}</span>{% endif %}</td>
+    <td data-label="For">{{ x.code or "" }}{% if x.description %}<div class="muted small">{{ x.description }}</div>{% endif %}</td>
+    <td data-label="Amount" class="num"><strong>{{ x.amount | usd_cents }}</strong></td>
+    <td data-label="Report">{% if x.url %}<a href="{{ x.url }}" rel="noopener nofollow">PDC ↗</a>{% endif %}</td>
+  </tr>{% endfor %}</tbody>
+</table></div>
+{{ pager(debts, request) }}
+{% else %}<p class="muted">No debts reported.</p>{% endif %}
+<h2 style="margin-top:1.5rem">Pledges</h2>
+{% if pledges %}
+<div class="table-wrap"><table class="rtable">
+  <thead><tr><th scope="col">Date</th><th scope="col">From</th><th scope="col">Place</th><th scope="col" class="num">Amount</th><th scope="col">Report</th></tr></thead>
+  <tbody>{% for x in pledges %}
+  <tr>
+    <td class="nowrap">{{ x.receipt_date | date }}</td>
+    <td class="desc"><strong>{{ x.contributor_name or "Not stated" }}</strong><span class="sub">{{ x.code or "" }}{% if x.employer %} · {{ x.employer }}{% endif %}</span></td>
+    <td data-label="Place">{{ x.city or "" }}{% if x.city and x.state %}, {% endif %}{{ x.state or "" }}</td>
+    <td data-label="Amount" class="num"><strong>{{ x.amount | usd_cents }}</strong></td>
+    <td data-label="Report">{% if x.url %}<a href="{{ x.url }}" rel="noopener nofollow">PDC ↗</a>{% endif %}</td>
+  </tr>{% endfor %}</tbody>
+</table></div>
+{% else %}<p class="muted">No pledges reported.</p>{% endif %}
+
+{% elif view == "outside" %}
+<p class="muted">Money spent to support or oppose {{ p.name }} by others, without coordinating with the campaign. This table comes from itemized PDC C-6 reports that name the candidate; the campaign's filing totals on the Overview tab can differ because some committees report this spending on other forms.</p>
+{% if by_sponsor %}
+<div class="table-wrap"><table class="rtable">
+  <thead><tr><th scope="col">Year</th><th scope="col">Paid for by</th><th scope="col">Position</th><th scope="col" class="num">Amount for this candidate</th><th scope="col">Dates</th><th scope="col">Report</th></tr></thead>
+  <tbody>{% for x in by_sponsor %}
+  <tr>
+    <td>{{ x.election_year }}</td>
+    <td class="desc"><strong>{{ x.sponsor_name }}</strong></td>
+    <td data-label="Position"><span class="badge {{ 'tone-law' if x.for_or_against == 'For' else 'tone-bad' }}">{{ x.for_or_against or "—" }}</span></td>
+    <td data-label="Amount" class="num">{{ x.total | usd_cents }}</td>
+    <td data-label="Dates" class="nowrap">{{ x.first_date | date }}{% if x.last_date != x.first_date %} – {{ x.last_date | date }}{% endif %}</td>
+    <td data-label="Report">{% if x.url %}<a href="{{ x.url }}" rel="noopener nofollow">PDC ↗</a>{% endif %}</td>
+  </tr>{% endfor %}</tbody>
+</table></div>
+{% else %}<div class="card empty"><p>No itemized outside spending names this person.</p></div>{% endif %}
+{% if funders %}
+<h2 style="margin-top:1.5rem">Who funded those reports</h2>
+<p class="muted small">The 60 largest declared funders of the reports above. A report often covers several candidates, so a funder's money didn't necessarily all go toward this one.</p>
+<div class="table-wrap"><table class="rtable">
+  <thead><tr><th scope="col">Funder</th><th scope="col">Through</th><th scope="col">Place</th><th scope="col" class="num">Amount</th></tr></thead>
+  <tbody>{% for x in funders %}
+  <tr>
+    <td class="desc"><strong>{{ x.funder_name or "Not stated" }}</strong>{% if x.employer %}<span class="sub">{{ x.employer }}</span>{% endif %}</td>
+    <td data-label="Through">{{ x.sponsor_name }}</td>
+    <td data-label="Place">{{ x.city or "" }}{% if x.city and x.state %}, {% endif %}{{ x.state or "" }}</td>
+    <td data-label="Amount" class="num">{{ x.total | usd_cents }}</td>
+  </tr>{% endfor %}</tbody>
+</table></div>
+{% endif %}
+
+{% elif view == "surplus" %}
+<p class="muted">Campaigns can move leftover money to a surplus funds account. It can't be used for personal expenses, but it can go to charity, political parties, caucus committees, or future office expenses.</p>
+{% if accounts %}
+<section class="stats" aria-label="Surplus account">
+  {% for a in accounts %}
+  <div class="stat"><div class="n">{{ a.raised | usd_short }}</div><div class="l">Received in total</div></div>
+  <div class="stat"><div class="n">{{ a.spent | usd_short }}</div><div class="l">Spent in total</div></div>
+  <div class="stat"><div class="n">{{ a.balance | usd_short }}</div><div class="l">Balance{% if a.thru_date %} as of {{ a.thru_date | date }}{% endif %}{% if a.url %} · <a href="{{ a.url }}" rel="noopener nofollow">report ↗</a>{% endif %}</div></div>
+  {% endfor %}
+</section>
+{% endif %}
+{% if spending.items %}
+<p class="result-meta" style="margin-top:1rem">{{ "{:,}".format(spending.total) }} payment{{ "" if spending.total == 1 else "s" }} · {{ spending.extra.total | usd_cents }}</p>
+<div class="table-wrap"><table class="rtable">
+  <thead><tr><th scope="col">Date</th><th scope="col">Paid to</th><th scope="col">Place</th><th scope="col">For</th><th scope="col" class="num">Amount</th><th scope="col">Report</th></tr></thead>
+  <tbody>{% for x in spending.items %}
+  <tr>
+    <td class="nowrap">{{ x.expenditure_date | date }}</td>
+    <td class="desc"><strong>{{ x.recipient_name or "Not itemized" }}</strong></td>
+    <td data-label="Place">{{ x.recipient_city or "" }}{% if x.recipient_city and x.recipient_state %}, {% endif %}{{ x.recipient_state or "" }}</td>
+    <td data-label="For">{{ x.description or "—" }}</td>
+    <td data-label="Amount" class="num"><strong>{{ x.amount | usd_cents }}</strong></td>
+    <td data-label="Report">{% if x.url %}<a href="{{ x.url }}" rel="noopener nofollow">PDC ↗</a>{% endif %}</td>
+  </tr>{% endfor %}</tbody>
+</table></div>
+{{ pager(spending, request) }}
+{% elif not accounts %}<div class="card empty"><p>No surplus funds account on record.</p></div>{% endif %}
+
+{% elif view == "disclosures" %}
+<p class="muted">Elected officials and candidates file a personal financial affairs statement each year. Dollar amounts are reported in ranges. For privacy, this page leaves out home addresses, the names of family members, and anything reported only for a dependent. The linked filing is the official record.</p>
+{% if statements %}
+{% if statement %}
+<form class="filters" method="get">
+  <input type="hidden" name="view" value="disclosures">
+  <div class="wide"><label for="d-s">Statement</label>
+    <select id="d-s" name="statement">
+      {% for s in statements if s.has_details %}<option value="{{ s.id }}"{% if statement and statement.id == s.id %} selected{% endif %}>{{ s.period_start | date }} to {{ s.period_end | date }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="actions"><button class="btn" type="submit">Show</button></div>
+</form>
+{% set d = statement.details %}
+{% macro who(row) %}{% if row.who and row.who != ["Official"] %} <span class="badge tone-muted">{{ row.who | join(", ") }}</span>{% endif %}{% endmacro %}
+<p class="small muted">Filed {{ statement.receipt_date | date }}.{% if statement.url %} <a href="{{ statement.url }}" rel="noopener nofollow">Official statement at the PDC ↗</a>{% endif %}</p>
+<section class="stack">
+  <div class="card"><h2>Income sources</h2>
+    {% if d.income %}<div class="table-wrap"><table class="rtable"><thead><tr><th scope="col">Paid by</th><th scope="col">For</th><th scope="col">Place</th><th scope="col">Amount range</th></tr></thead><tbody>
+    {% for x in d.income %}<tr><td class="desc"><strong>{{ x.source or "Not stated" }}</strong>{{ who(x) }}</td><td data-label="For">{{ x.for or "—" }}</td><td data-label="Place">{{ x.city or "" }}{% if x.city and x.state %}, {% endif %}{{ x.state or "" }}</td><td data-label="Range" class="nowrap">{{ x.amount | range_label }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="muted">None reported.</p>{% endif %}
+  </div>
+  <div class="card"><h2>Businesses and organizations</h2>
+    {% if d.businesses %}<div class="table-wrap"><table class="rtable"><thead><tr><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Payments reported</th></tr></thead><tbody>
+    {% for x in d.businesses %}<tr><td class="desc"><strong>{{ x.name or "Not stated" }}</strong>{{ who(x) }}{% if x.what %}<span class="sub">{{ x.what }}</span>{% endif %}</td><td data-label="Role">{{ x.position or x.category or "—" }}{% if x.ownership %}<div class="muted small">{{ x.ownership }} owned</div>{% endif %}</td><td data-label="Payments">
+      {% for y in x.paid_by_government %}<div class="small">Government office: {{ y.purpose or "" }}{% if y.amount %} ({{ y.amount | range_label }}){% endif %}</div>{% endfor %}
+      {% for y in x.paid_by_state_agencies %}<div class="small">{{ y.agency or "State agency" }}{% if y.purpose %}: {{ y.purpose }}{% endif %}</div>{% endfor %}
+      {% for y in x.paid_by_businesses %}<div class="small">{{ y.business or "Business" }}{% if y.purpose %}: {{ y.purpose }}{% endif %}</div>{% endfor %}
+      {% if not x.paid_by_government and not x.paid_by_state_agencies and not x.paid_by_businesses %}<span class="muted">—</span>{% endif %}
+    </td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="muted">None reported.</p>{% endif %}
+  </div>
+  <div class="card"><h2>Gifts received</h2>
+    {% if d.gifts %}<div class="table-wrap"><table class="rtable"><thead><tr><th scope="col">From</th><th scope="col">What</th><th scope="col">Date</th><th scope="col" class="num">Value</th></tr></thead><tbody>
+    {% for x in d.gifts %}<tr><td class="desc"><strong>{{ x.donor or "Not stated" }}</strong>{{ who(x) }}{% if x.city %}<span class="sub">{{ x.city }}{% if x.state %}, {{ x.state }}{% endif %}</span>{% endif %}</td><td data-label="What">{{ x.what or "—" }}</td><td data-label="Date" class="nowrap">{{ x.date or "—" }}</td><td data-label="Value" class="num">{% if x.value %}${{ x.value }}{% else %}—{% endif %}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="muted">None reported.</p>{% endif %}
+  </div>
+  <div class="card"><h2>Accounts and investments</h2>
+    {% if d.accounts %}<div class="table-wrap"><table class="rtable"><thead><tr><th scope="col">Institution</th><th scope="col">Holdings</th></tr></thead><tbody>
+    {% for x in d.accounts %}<tr><td class="desc"><strong>{{ x.name or "Not stated" }}</strong>{{ who(x) }}{% if x.city %}<span class="sub">{{ x.city }}{% if x.state %}, {{ x.state }}{% endif %}</span>{% endif %}</td><td data-label="Holdings">{% for a in x.assets %}<div class="small">{{ a.nature or "Asset" }}{% if a.value %}: value {{ a.value | range_label }}{% endif %}{% if a.income %}; income {{ a.income | range_label }}{% endif %}</div>{% else %}<span class="muted">—</span>{% endfor %}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="muted">None reported.</p>{% endif %}
+  </div>
+  <div class="card"><h2>Debts</h2>
+    {% if d.creditors %}<div class="table-wrap"><table class="rtable"><thead><tr><th scope="col">Owed to</th><th scope="col">Terms</th><th scope="col">Original</th><th scope="col">Owed at end of period</th></tr></thead><tbody>
+    {% for x in d.creditors %}<tr><td class="desc"><strong>{{ x.name or "Not stated" }}</strong>{{ who(x) }}</td><td data-label="Terms">{{ x.terms or "—" }}</td><td data-label="Original">{{ x.original | range_label }}</td><td data-label="Owed">{{ x.owed | range_label }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="muted">None reported.</p>{% endif %}
+  </div>
+  <div class="card"><h2>Real estate</h2>
+    {% if d.location_withheld %}<p class="small muted">This filer is a judge or law enforcement officer, so property locations are left out.</p>{% endif %}
+    {% if d.real_estate %}<div class="table-wrap"><table class="rtable"><thead><tr><th scope="col">Location</th><th scope="col">Assessed value</th><th scope="col">Activity</th><th scope="col">Lenders</th></tr></thead><tbody>
+    {% for x in d.real_estate %}<tr><td class="desc">{{ x.city or x.county or "Location not shown" }}{{ who(x) }}</td><td data-label="Assessed">{{ x.assessed_value | range_label }}</td><td data-label="Activity">{% if x.purchased %}Bought{% elif x.sold %}Sold{% else %}Held{% endif %}</td><td data-label="Lenders">{% for y in x.lenders %}<div class="small">{{ y.name or "Not stated" }}{% if y.current_amount %}: {{ y.current_amount | range_label }}{% endif %}</div>{% else %}<span class="muted">—</span>{% endfor %}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="muted">None reported.</p>{% endif %}
+  </div>
+  {% if d.lobbying %}
+  <div class="card"><h2>Lobbying</h2>
+    <div class="table-wrap"><table class="rtable"><thead><tr><th scope="col">For</th><th scope="col">Purpose</th><th scope="col">Compensation</th></tr></thead><tbody>
+    {% for x in d.lobbying %}<tr><td class="desc"><strong>{{ x.for or "Not stated" }}</strong>{{ who(x) }}</td><td data-label="Purpose">{{ x.purpose or "—" }}</td><td data-label="Compensation">{{ x.compensation or "—" }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+  {% endif %}
+</section>
+{% else %}
+<div class="card empty"><p>No statement here has details in electronic form.</p></div>
+{% endif %}
+{% set older = statements | rejectattr("has_details") | list %}
+{% if older %}
+<h2 style="margin-top:1.5rem">Older statements</h2>
+<p class="muted small">These {{ older | length }} were filed before the PDC's electronic format, so their contents aren't published as data. The PDC provides them on request.</p>
+<ul class="list">{% for s in older %}<li class="small">{{ s.period_start | date }} to {{ s.period_end | date }} · filed {{ s.receipt_date | date }}{% if s.url %} · <a href="{{ s.url }}" rel="noopener nofollow">Request from the PDC ↗</a>{% endif %}</li>{% endfor %}</ul>
+{% endif %}
+{% else %}
+<div class="card empty"><p>No personal financial statements on record.</p></div>
+{% endif %}
+{% endif %}
+
+{% if p.link_note %}<p class="small muted" style="margin-top:1rem">Record match: {{ p.link_note }}</p>{% endif %}
+{% endif %}
+{{ source_note() }}
+{% endblock %}

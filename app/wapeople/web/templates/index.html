@@ -50,11 +50,18 @@
 
 {% if cur and counts.cur_bills %}
 <p class="muted small" style="margin-top:.75rem">
-  {{ cur.id | biennium }} so far: {{ "{:,}".format(counts.cur_bills) }} bills introduced ·
+  {{ cur.id | biennium }}{% if cur.status in ("adjourned_final", "closed") %} final count{% else %} so far{% endif %}: {{ "{:,}".format(counts.cur_bills) }} bills introduced ·
   <a href="/bills?biennium={{ cur.id }}&stage=enacted">{{ counts.cur_laws }} enacted</a> ·
   <a href="/bills?biennium={{ cur.id }}&stage=vetoed">{{ counts.cur_vetoed }} vetoed</a>
   {% if counts.cur_dead %}· <a href="/bills?biennium={{ cur.id }}&stage=did_not_pass">{{ "{:,}".format(counts.cur_dead) }} did not pass</a>{% endif %}
 </p>
+{% endif %}
+
+{% if money.with_records %}
+<a class="banner card-link" href="/money" style="margin-top:1rem">
+  <strong>Follow the money</strong>
+  Who funds Washington's {{ money.current_people }} state legislators, statewide officials and Supreme Court justices: {{ money.current_raised | usd_short }} raised, {{ "{:,}".format(money.contributions) }} itemized contributions, and where it all went. →
+</a>
 {% endif %}
 
 <div class="grid-2" style="margin-top:1.5rem">

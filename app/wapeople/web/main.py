@@ -5,15 +5,17 @@ import json
 import re
 import time
 from datetime import date, datetime, timedelta
+from html import escape
 from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .. import config as CFG
 from .. import contact as C
 from ..courts.sync import CATEGORIES
 from ..db import conn
@@ -23,13 +25,19 @@ from ..legislature.parse import (
 )
 from ..legislature.stages import STAGES, next_session_start
 from ..legislature.sync import current_biennium
+from ..money.clean import key_to_slug
+from . import money_queries as MQ
 from . import queries as Q
+from .middleware import CanonicalHostMiddleware, HeadMiddleware
+from .money_routes import build_router as build_money_router
 from .security import SecurityMiddleware
 
 HERE = Path(__file__).parent
 app = FastAPI(title="WA People", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(SecurityMiddleware)
+app.add_middleware(HeadMiddleware)
+app.add_middleware(CanonicalHostMiddleware, site_url=CFG.SITE_URL)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 
@@ -42,6 +50,62 @@ def fmt_date(d, long: bool = False) -> str:
     if isinstance(d, datetime):
         d = d.date()
     return d.strftime("%B %-d, %Y" if long else "%b %-d, %Y")
+
+
+def usd(v) -> str:
+    if v is None:
+        return "—"
+    v = float(v)
+    return f"-${-v:,.0f}" if v < 0 else f"${v:,.0f}"
+
+
+def usd_cents(v) -> str:
+    if v is None:
+        return "—"
+    v = float(v)
+    return f"-${-v:,.2f}" if v < 0 else f"${v:,.2f}"
+
+
+def usd_short(v) -> str:
+    """$1.2M / $45.3K / $812, for headline numbers. Exact figures stay in the tables."""
+    v = float(v or 0)
+    sign, a = ("-", -v) if v < 0 else ("", v)
+    if a >= 1_000_000:
+        return f"{sign}${a / 1_000_000:.1f}M"
+    if a >= 10_000:
+        return f"{sign}${a / 1_000:.0f}K"
+    return f"{sign}${a:,.0f}"
+
+
+_SMALL_WORDS = {"of", "the", "and", "for"}
+
+
+def office_label(s: str | None) -> str:
+    words = (s or "").lower().split()
+    return " ".join(w if w in _SMALL_WORDS and i else w.capitalize() for i, w in enumerate(words))
+
+
+def position_label(s: str | None) -> str:
+    m = re.search(r"(\d+)\s*$", str(s or ""))
+    return f"Position {m[1]}" if m else str(s or "")
+
+
+def range_label(s: str | None) -> str:
+    """Financial statement ranges: '30000-59999' -> '$30,000–$59,999'."""
+    s = (s or "").strip()
+    if not s:
+        return "—"
+    m = re.fullmatch(r"\$?(\d+)\s*-\s*\$?(\d+)", s)
+    if m:
+        return f"${int(m[1]):,}–${int(m[2]):,}"
+    m = re.fullmatch(r"\$?(\d+)\s*\+", s)
+    if m:
+        return f"${int(m[1]):,} or more"
+    return f"${int(s):,}" if s.isdigit() else s
+
+
+def org_link(row: dict) -> str:
+    return f"/money/organizations/{key_to_slug(row['key'])}"
 
 
 def biennium_label(b: str | None) -> str:
@@ -92,6 +156,14 @@ def qs(request: Request, **overrides) -> str:
 
 
 templates.env.filters["date"] = fmt_date
+templates.env.filters["usd"] = usd
+templates.env.filters["usd_cents"] = usd_cents
+templates.env.filters["usd_short"] = usd_short
+templates.env.filters["usd_blank"] = lambda v: "—" if v in (None, 0) else usd(v)
+templates.env.filters["office_label"] = office_label
+templates.env.filters["position_label"] = position_label
+templates.env.filters["range_label"] = range_label
+templates.env.filters["org_slug"] = key_to_slug
 templates.env.filters["biennium"] = biennium_label
 templates.env.filters["motion"] = motion_label
 templates.env.filters["first_bullet"] = lambda s: (s or "").split("\n", 1)[0]
@@ -100,7 +172,7 @@ templates.env.globals.update(
     bill_url=bill_url, qs=qs, leg_url=leg_url, PARTY_NAMES=PARTY_NAMES, STAGE_TONE=STAGE_TONE,
     STAGES=STAGES, CATEGORIES=CATEGORIES, TYPE_NAMES=TYPE_NAMES, TYPE_FILTERS=Q.TYPE_FILTERS,
     STAGE_FILTERS=Q.STAGE_FILTERS, BUCKETS=Q.BUCKETS, session_law_text=session_law_text,
-    base_id=base_bill_id,
+    base_id=base_bill_id, org_link=org_link,
 )
 
 
@@ -109,7 +181,12 @@ def render(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLRe
         ctx.setdefault("updated", Q.last_updates(c))
     ctx["current_biennium"] = current_biennium()
     ctx["path"] = request.url.path
+    ctx["canonical"] = site_base(request) + request.url.path
     return templates.TemplateResponse(request, name, ctx, status_code=status_code)
+
+
+def site_base(request: Request) -> str:
+    return CFG.SITE_URL or str(request.base_url).rstrip("/")
 
 
 def page_param(page: int) -> int:
@@ -131,10 +208,11 @@ def home(request: Request):
         cases = Q.search_cases(c, page_size=4).items
         moving = Q.search_bills(c, bucket="ongoing", sort="recent", page_size=6).items
         proposed = Q.search_bills(c, bucket="proposed", sort="introduced", page_size=6).items
+        money = MQ.overview(c)
     return render(
         request, "index.html", counts=counts, cur=cur_row, upcoming=upcoming,
         recent_laws=recent_laws, recent_votes=recent_votes, cases=cases, moving=moving,
-        proposed=proposed, next_session=next_session_start(),
+        proposed=proposed, next_session=next_session_start(), money=money,
     )
 
 
@@ -241,6 +319,12 @@ def legislators(request: Request, biennium: str = "", chamber: str = "", party: 
             biennium = current_biennium()
         members = Q.list_members(c, biennium=biennium, chamber=chamber, party=party,
                                  district=district.strip(), q=q.strip()[:100])
+        # More names than seats means some people left mid-term and were replaced. Say so, using
+        # the same "who voted last in this seat" rule as the district map.
+        seats = delegations(c, biennium)
+        holders = {m["id"] for d in seats.values() for m in d["senators"] + d["representatives"]}
+        for m in members:
+            m["left_early"] = bool(holders) and m["id"] not in holders
     return render(request, "legislators.html", members=members, bienniums=bienniums,
                   f=dict(biennium=biennium, chamber=chamber, party=party, district=district, q=q))
 
@@ -261,8 +345,9 @@ def legislator(request: Request, member_id: int, tab: str = "votes", biennium: s
             listing = Q.member_votes(c, member_id, biennium=biennium, vote=vote,
                                      final_only=final == "1", q=q.strip()[:200], page=page_param(page))
         bienniums = [t["biennium"] for t in member["terms"]]
+        money = MQ.legislator_money(c, member_id)
     return render(request, "legislator.html", m=member, stats=stats, tab=tab, listing=listing,
-                  bienniums=bienniums, f=dict(biennium=biennium, vote=vote, final=final, q=q))
+                  bienniums=bienniums, money=money, f=dict(biennium=biennium, vote=vote, final=final, q=q))
 
 
 @app.get("/votes", response_class=HTMLResponse)
@@ -329,8 +414,9 @@ def search(request: Request, q: str = ""):
             b = bills_page.items[0]
             return RedirectResponse(bill_url(b["biennium"], b["bill_id"]), status_code=302)
         members = [] if ref else Q.search_members(c, q)
+        orgs = [] if ref else MQ.search_orgs(c, q)
         cases = Q.search_cases(c, q=q, sort="relevance", page_size=6)
-    return render(request, "search.html", q=q, bills=bills_page, members=members, cases=cases)
+    return render(request, "search.html", q=q, bills=bills_page, members=members, cases=cases, orgs=orgs)
 
 
 @app.get("/about", response_class=HTMLResponse)
@@ -418,7 +504,7 @@ def contact_sent(request: Request):
 
 # ---- Legal and security pages --------------------------------------------------------
 
-LEGAL_UPDATED = date(2026, 10, 11)
+LEGAL_UPDATED = date(2026, 11, 5)
 
 
 @app.get("/privacy", response_class=HTMLResponse)
@@ -438,11 +524,64 @@ def disclaimer(request: Request):
 
 
 @app.get("/robots.txt", response_class=PlainTextResponse)
-def robots():
+def robots(request: Request):
+    # /money/*? keeps itemized donor listings (and every filter combination) out of search engines;
+    # each official's overview stays visible.
     return ("User-agent: *\n"
             "Allow: /\n"
             "Disallow: /contact\n"
-            "Disallow: /search\n")
+            "Disallow: /search\n"
+            "Disallow: /money/*?\n"
+            f"Sitemap: {site_base(request)}/sitemap.xml\n")
+
+
+SITEMAP_PAGES = ("/", "/bills", "/legislators", "/map", "/votes", "/money", "/money/organizations", "/court",
+                 "/about", "/privacy", "/terms", "/disclaimer")
+_XML = '<?xml version="1.0" encoding="UTF-8"?>\n'
+_NS = 'xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
+
+
+def _xml(body: str) -> Response:
+    return Response(_XML + body, media_type="application/xml", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/sitemap.xml")
+def sitemap_index(request: Request):
+    base = site_base(request)
+    with conn() as c:
+        names = ["pages", "people", "court"] + [f"bills-{b['id']}" for b in Q.bienniums(c)]
+    items = "".join(f"<sitemap><loc>{base}/sitemap-{n}.xml</loc></sitemap>" for n in names)
+    return _xml(f"<sitemapindex {_NS}>{items}</sitemapindex>")
+
+
+@app.get("/sitemap-{name}.xml")
+def sitemap_part(request: Request, name: str):
+    base = site_base(request)
+    with conn() as c:
+        if name == "pages":
+            paths = list(SITEMAP_PAGES)
+        elif name == "people":
+            paths = [f"/legislators/{r['id']}" for r in c.execute("SELECT id FROM members ORDER BY id")]
+            paths += [f"/money/{r['id']}" for r in c.execute("SELECT id FROM money_people WHERE n_campaigns > 0 ORDER BY id")]
+            paths += [f"/money/organizations/{key_to_slug(r['key'])}"
+                      for r in c.execute("SELECT key FROM money_orgs ORDER BY total DESC LIMIT 20000")]
+        elif name == "court":
+            paths = [f"/court/{r['id']}" for r in c.execute("SELECT id FROM court_cases ORDER BY id")]
+        elif name.startswith("bills-") and re.fullmatch(r"\d{4}-\d{2}", name[6:]):
+            paths = [bill_url(r["biennium"], r["bill_id"]) for r in c.execute(
+                "SELECT biennium, bill_id FROM bills WHERE biennium = %s ORDER BY bill_number", (name[6:],))]
+            if not paths:
+                raise HTTPException(404)
+        else:
+            raise HTTPException(404)
+    items = "".join(f"<url><loc>{base}{escape(p)}</loc></url>" for p in paths)
+    return _xml(f"<urlset {_NS}>{items}</urlset>")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return FileResponse(HERE / "static" / "favicon.ico", media_type="image/x-icon",
+                        headers={"Cache-Control": "public, max-age=604800"})
 
 
 @app.get("/.well-known/security.txt", response_class=PlainTextResponse)
@@ -461,6 +600,9 @@ def healthz():
     with conn() as c:
         c.execute("SELECT 1")
     return "ok"
+
+
+app.include_router(build_money_router(render))
 
 
 @app.exception_handler(404)

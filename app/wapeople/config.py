@@ -14,6 +14,11 @@ COURTLISTENER_BASE = "https://www.courtlistener.com/api/rest/v4"
 COURTLISTENER_TOKEN = os.environ.get("COURTLISTENER_API_TOKEN") or None
 COURT_CASES_SINCE = os.environ.get("COURT_CASES_SINCE") or "1991-01-01"
 
+# Public Disclosure Commission open data (campaign money). No key needed; a free Socrata app
+# token just raises the rate limit.
+PDC_BASE = "https://data.wa.gov/resource"
+SOCRATA_APP_TOKEN = os.environ.get("SOCRATA_APP_TOKEN") or None
+
 USER_AGENT = "WAPeople/0.1 (open-source civic legislation tracker)"
 
 SYNC_HOUR_LOCAL = int(os.environ.get("SYNC_HOUR_LOCAL", "5"))

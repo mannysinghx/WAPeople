@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% from "_macros.html" import party %}
+{% from "_money.html" import source_note with context %}
+{% block title %}Money trails: who funds Washington's elected officials{% endblock %}
+{% block description %}How much money each Washington State legislator, statewide official, and Supreme Court justice raised, who gave it, where it came from, and where it went. From Public Disclosure Commission records.{% endblock %}
+{% block content %}
+<section class="hero" style="padding-top:.5rem">
+  <h1>Money trails</h1>
+  <p class="lead">Who funds Washington's elected officials, how much they gave, where it came from, and where the money went next. Every figure comes from reports filed with the state's Public Disclosure Commission, and every record links to the report it came from.</p>
+</section>
+
+{% if not stats.with_records %}
+<div class="card empty"><h2>Campaign records are loading</h2><p>This page fills in after the next data refresh.</p></div>
+{% else %}
+<section class="stats" aria-label="Totals">
+  <div class="stat"><div class="n">{{ stats.current_people }}</div><div class="l">Elected officials in office</div></div>
+  <div class="stat"><div class="n">{{ stats.current_raised | usd_short }}</div><div class="l">They've raised, in all campaigns on record</div></div>
+  <div class="stat"><div class="n">{{ "{:,}".format(stats.contributions) }}</div><div class="l">Itemized contributions</div></div>
+  <div class="stat"><a class="card-link" href="/money/organizations"><div class="n">{{ "{:,}".format(stats.orgs) }}</div><div class="l">Organizations that gave →</div></a></div>
+</section>
+
+<form class="filters" method="get" style="margin-top:1rem">
+  <div class="wide">
+    <label for="m-q">Name</label>
+    <input id="m-q" type="search" name="q" value="{{ f.q }}" placeholder="e.g. Billig">
+  </div>
+  <div>
+    <label for="m-g">Office</label>
+    <select id="m-g" name="group">
+      {% for k, label in GROUPS.items() %}<option value="{{ k }}"{% if f.group == k %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label for="m-p">Party</label>
+    <select id="m-p" name="party">
+      <option value="">Any</option>
+      <option value="D"{% if f.party == "D" %} selected{% endif %}>Democrat</option>
+      <option value="R"{% if f.party == "R" %} selected{% endif %}>Republican</option>
+    </select>
+  </div>
+  <div>
+    <label for="m-s">Sort by</label>
+    <select id="m-s" name="sort">
+      <option value="raised"{% if f.sort == "raised" %} selected{% endif %}>Most raised</option>
+      <option value="latest"{% if f.sort == "latest" %} selected{% endif %}>Latest campaign</option>
+      <option value="spent"{% if f.sort == "spent" %} selected{% endif %}>Most spent</option>
+      <option value="district"{% if f.sort == "district" %} selected{% endif %}>District</option>
+      <option value="name"{% if f.sort == "name" %} selected{% endif %}>Name</option>
+    </select>
+  </div>
+  <div>
+    <label for="m-f">Who</label>
+    <select id="m-f" name="former">
+      <option value="">In office now</option>
+      <option value="1"{% if f.former == "1" %} selected{% endif %}>Include former legislators</option>
+    </select>
+  </div>
+  <div class="actions"><button class="btn" type="submit">Apply</button></div>
+</form>
+
+<p class="result-meta">{{ people | length }} {{ "person" if people | length == 1 else "people" }}</p>
+{% if people %}
+<div class="table-wrap">
+<table class="rtable">
+  <thead><tr><th scope="col">Name</th><th scope="col">Office</th><th scope="col" class="num">Raised, all campaigns</th><th scope="col" class="num">Latest campaign</th><th scope="col" class="num">From Washington</th><th scope="col">Largest source</th></tr></thead>
+  <tbody>
+  {% for m in people %}
+  <tr>
+    <td><a href="/money/{{ m.id }}"><strong>{{ m.name }}</strong></a>{% if m.party in ("D", "R") %} <span class="small">{{ party(m.party) }}</span>{% endif %}</td>
+    <td data-label="Office">{{ m.title }}</td>
+    <td data-label="Raised" class="num">{% if m.n_campaigns %}{{ m.total_raised | usd }}{% else %}<span class="muted">No records</span>{% endif %}</td>
+    <td data-label="Latest" class="num">{% if m.latest_raised is not none %}{{ m.latest_raised | usd }} <span class="muted small">({{ m.latest_year }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td data-label="From Washington" class="num">{% if m.in_state + m.out_of_state > 0 %}{{ (100 * m.in_state / (m.in_state + m.out_of_state)) | round | int }}%{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td data-label="Largest source">{{ m.top_source or "—" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="card empty"><h2>No one matches</h2><p>Try another name or clear the filters.</p></div>
+{% endif %}
+<p class="muted small" style="margin-top:1rem">"Raised" adds up every campaign in the PDC's electronic records, which begin with the 2009–10 cycle, for any Washington office the person ran for. Money a candidate moves from one campaign to the next is reported again by the new campaign, so it can count more than once. "From Washington" is the share of contributions with a stated location; small unitemized gifts have none.</p>
+{% endif %}
+{{ source_note() }}
+{% endblock %}
