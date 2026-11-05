@@ -194,3 +194,46 @@ def test_spam_is_kept_but_not_emailed(monkeypatch):
     assert stats == {"contact_sent": 1, "contact_failed": 0, "contact_spam_held": 1}
     assert updates == [("spam", 1), ("sent", 2)]
     assert len(sent) == 1 and "HB 1217" in sent[0].get_content()
+
+
+# ---- pypdf was upgraded for security: court opinion text must still come out ----------------
+
+def minimal_pdf(line: str) -> bytes:
+    stream = f"BT /F1 12 Tf 72 720 Td ({line}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R"
+        b" /Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out, offsets = b"%PDF-1.4\n", []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += str(number).encode() + b" 0 obj\n" + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 " + str(len(objects) + 1).encode() + b"\n0000000000 65535 f \n"
+    for offset in offsets:
+        out += f"{offset:010d} 00000 n \n".encode()
+    out += b"trailer\n<< /Size " + str(len(objects) + 1).encode() + b" /Root 1 0 R >>\nstartxref\n"
+    return out + str(xref).encode() + b"\n%%EOF\n"
+
+
+def pdf_fetcher(response):
+    from wapeople.courts.client import PdfFetcher
+
+    fetcher = PdfFetcher()
+    fetcher.throttle.wait = lambda: None
+    fetcher.http = httpx.Client(transport=httpx.MockTransport(lambda req: response))
+    return fetcher
+
+
+def test_opinion_pdf_text_is_extracted():
+    text = pdf_fetcher(httpx.Response(200, content=minimal_pdf("Laws of 2021, ch. 196"))).text("https://x/o.pdf")
+    assert "Laws of 2021, ch. 196" in text
+
+
+def test_missing_and_malformed_pdfs_return_nothing():
+    assert pdf_fetcher(httpx.Response(404)).text("https://x/o.pdf") is None
+    assert pdf_fetcher(httpx.Response(200, content=b"%PDF-1.4 not really a pdf")).text("https://x/o.pdf") in (None, "")
