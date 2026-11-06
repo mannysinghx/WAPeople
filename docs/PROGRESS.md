@@ -1,10 +1,10 @@
 # WA People progress
 
-## Where it stopped (2026-11-05)
+## Where it stopped (2026-11-05, PST)
 
-- Branch `claude/wa-people-money-trails-28ed0d`, based on `main` at `15ce984`. See `git log` for the last commit.
-- Nothing is pushed or deployed from this work yet; wapeople.org is unchanged. Waiting for the owner's OK on one push (see Next steps).
-- Uncommitted: only `.claude/launch.json`, a local preview config that is not part of the project.
+- **Live on wapeople.org.** `main` is at `d684aee`, deployed to `WAPeople` (`fe788e34`) and `sync` (`1fbd10b3`). The first production load finished at 04:23 UTC on 2026-11-06.
+- Branch `claude/wa-people-money-trails-28ed0d` holds this document's latest update, which is docs only. A docs-only push doesn't redeploy anything (Railway watches `/app/**`).
+- Uncommitted: nothing.
 
 ## Done and verified
 
@@ -37,13 +37,28 @@ Tests: `scripts/ci-local.sh` must pass on the exact commit before the push. The 
 
 ## In flight
 
-Nothing that writes. The dev database and dev server below can be deleted at any time.
+Nothing.
+
+## Live checks after the deploy
+
+| Check | Result |
+| --- | --- |
+| `sync_runs`, first production load | `legislature`, `courts`, `money`, `fec`, `contact` all `ok`, about 19 minutes in all: state 634 s, federal 321 s |
+| State money against the PDC | contributions 1,003,969, expenditures 212,544, debts 22,767, loans 1,375, pledges 961, all `mismatched: 0`; 415 people linked, none unlinked |
+| Federal money | 616,173 rows, 130 cycles, 23 people, receipts $338,824,476.78, `cycles_operating_above_reported: 0`. Same figures as the final dev load |
+| Coverage | 177 officials in office (147 legislators, 9 statewide, 9 justices, 12 in Congress), none without records |
+| Existing data | Placeholder names 15 to 0, empty terms 16 to 0, `/legislators/15814` shows Ann Rivers. The 9 stored contact messages stay `failed`, not `spam`, because the spam rule only reads messages still waiting to send |
+| Privacy scan on production | Phones and emails in expenses and statements, and long ZIP codes: 0 |
+| Pages | The same page checks as on dev all passed live; 12 requests at once all 200, slowest 0.94 s; `curl -I /` is 200; the Railway address redirects to wapeople.org |
+| Courts with the token | Step `ok`, 1,138 cases, no new ones matched; newest case on file is 2026-09-17 |
+| Size | Database 835 MB to 1,519 MB of a 50 GB volume |
+
+Not checked on production: the next scheduled run at 12:00 UTC, and whether search engines honor the noindex rules.
 
 ## Open decisions
 
 | Item | Where | Who |
 | --- | --- | --- |
-| Approve the one push to `main` | below | Owner |
 | Delete `COURTLISTENER_API_TOKEN` from `WAPeople` (harmless, not used there) | Railway variables | Owner |
 | Set `SMTP_PASSWORD` (Gmail App Password) on `WAPeople` and `sync` | Railway variables | Owner: only they can create it |
 | `www.wapeople.org` has no DNS record | CNAME at Namecheap, then add the domain in Railway | Owner |
@@ -79,26 +94,27 @@ Known limits:
 
 ## Next steps, in order
 
-1. Owner approves the push.
-2. Set `SITE_URL=https://wapeople.org` on `WAPeople` and `sync` (Railway, no deploy of its own).
-3. Run `scripts/ci-local.sh` on the exact commit, then push to `main` (`git push origin HEAD:main`; fast-forward from `15ce984`). Railway redeploys `WAPeople` and `sync` (both watch `/app/**`). The web service applies migrations 006 to 009 at startup. All new tables except up to 15 member names restored, about 16 empty `member_terms` rows deleted, and spam contact rows marked `spam` when the sync runs.
-4. Run the first load: run the `sync` service now or wait for the 12:00 UTC cron. State 11 to 14 minutes, FEC 7 to 32 minutes, about 1 GB more in Postgres; `/money` says "loading" until then.
-5. Verify live: `/money`, `/money/18264`, `/money/299`, `/legislators/15814` shows Ann Rivers, `curl -I https://wapeople.org/` is 200, the `sync_runs` row for `money` has `mismatched: 0`, the `fec` row has `cycles_operating_above_reported: 0`.
-6. January 2027: update `app/wapeople/data/money_officials.json` (statewide, justices and `federal`) for officeholders taking office after the November 3, 2026 election.
+1. Check that the 12:00 UTC `sync` run on 2026-11-06 finishes with every step `ok` and reloads little.
+2. Owner: set `SMTP_PASSWORD`, add the `www` CNAME, and delete the unused token from `WAPeople`.
+3. January 2027: update `app/wapeople/data/money_officials.json` (statewide, justices, `federal` and `federal_runs`) for officeholders taking office after the November 3, 2026 election.
 
 ## How to resume
 
 ```bash
-# Isolated dev database (never the wapeople_pgdata volume): container wapeople-money-db on 127.0.0.1:55491
-docker start wapeople-money-db
-cd app && DATABASE_URL=postgresql://wapeople:devonly@localhost:55491/wapeople python -m wapeople.sync money
+# A dev database, separate from the wapeople_pgdata volume. The one used for this work has been deleted.
+docker run -d --name wapeople-money-db -p 127.0.0.1:55491:5432 -e POSTGRES_USER=wapeople -e POSTGRES_PASSWORD=devonly -e POSTGRES_DB=wapeople -v wapeople_money_dev:/var/lib/postgresql postgres:18-alpine
+gunzip -c backups/wapeople-20261011-1156.sql.gz | docker exec -i wapeople-money-db psql -q -U wapeople -d wapeople
+cd app
+DATABASE_URL=postgresql://wapeople:devonly@localhost:55491/wapeople python -m wapeople.migrate
+DATABASE_URL=postgresql://wapeople:devonly@localhost:55491/wapeople python -m wapeople.sync money
 DATABASE_URL=postgresql://wapeople:devonly@localhost:55491/wapeople python -m wapeople.sync fec
-TEST_DATABASE_URL=postgresql://wapeople:devonly@localhost:55491/wapeople_test python -m pytest -q tests
-scripts/ci-local.sh
+cd .. && scripts/ci-local.sh
 ```
 
-Delete the dev database when finished: `docker rm -f wapeople-money-db && docker volume rm wapeople_money_dev`.
+Read production without writing: `railway ssh --project 1b422108-9d10-4bed-9514-96a15124f8d0 --environment production --service WAPeople -- python -`, with a script that connects using `options="-c default_transaction_read_only=on"`.
 
-Inputs: all in the repo. The roster and hand-made links are in `app/wapeople/data/money_officials.json`; data comes live from data.wa.gov and the FEC's public bulk files. The dev database started from `backups/wapeople-20261011-1156.sql.gz` in the main checkout.
+Roll back: Railway deployments `efbecf38` (`WAPeople`) and `a2df1aee` (`sync`) are the last ones before this work.
 
-Keep parallel work low on this Mac: 19 agents at once crashed it on 2026-11-05. At most 2, and no crawlers.
+Inputs: all in the repo. The roster and hand-made links are in `app/wapeople/data/money_officials.json`; data comes live from data.wa.gov and the FEC's public bulk files. The backup above is in the main checkout.
+
+A deployment of the `sync` service can start a run on its own, without waiting for the schedule, and redeploying stops a run in progress. Keep parallel work low on this Mac: 19 agents at once crashed it on 2026-11-05. At most 2, and no crawlers.
