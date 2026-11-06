@@ -1,6 +1,8 @@
 """Regression tests for bugs found on the live site in November 2026."""
 from datetime import datetime, timezone
 
+import logging
+
 import httpx
 import pytest
 from starlette.applications import Starlette
@@ -11,7 +13,7 @@ from starlette.testclient import TestClient
 from wapeople import config, contact
 from wapeople.courts.client import AuthRequired, CourtListener
 from wapeople.legislature.sync import LegislatureSync, is_placeholder_member
-from wapeople.web.middleware import CanonicalHostMiddleware, HeadMiddleware
+from wapeople.web.middleware import CanonicalHostMiddleware, HeadMiddleware, NulByteMiddleware, redirect_target
 
 
 # ---- HEAD answered 405 on every page ------------------------------------------------------
@@ -73,6 +75,46 @@ def test_no_site_url_means_no_redirects():
     assert host_client(site="").get("/", headers={"host": "www.wapeople.org"}).status_code == 200
 
 
+# ---- The redirect keeps the URL exactly as it was requested ---------------------------------
+
+@pytest.mark.parametrize("path", ["/%E2%82%AC", "/a%3Fb=c", "/a%23frag", "/caf%C3%A9", "/a%20b",
+                                  "/x%0d%0aSet-Cookie:%20a=1", "/x%00y", "/money/organizations/BOEING"])
+def test_redirect_keeps_the_path_as_it_was_sent(path):
+    r = host_client().get(path, headers={"host": "www.wapeople.org"})
+    assert r.status_code == 301
+    assert r.headers["location"] == f"https://wapeople.org{path}"
+
+
+def test_redirect_stays_on_the_public_site():
+    r = host_client().get("//evil.example/x", headers={"host": "www.wapeople.org"})
+    assert r.headers["location"].startswith("https://wapeople.org/")
+
+
+def test_redirect_target_encodes_raw_bytes_and_has_a_fallback():
+    assert redirect_target({"raw_path": b"/caf\xc3\xa9 x", "query_string": b"q=a b"}) == "/caf%C3%A9%20x?q=a%20b"
+    assert redirect_target({"path": "/caf\u00e9 x?", "query_string": b""}) == "/caf%C3%A9%20x%3F"
+
+
+# ---- A NUL byte can't reach the database ----------------------------------------------------
+
+def nul_client():
+    async def page(request):
+        return PlainTextResponse("ok")
+    app = Starlette(routes=[Route("/{p:path}", page, methods=["GET", "POST"])])
+    app.add_middleware(NulByteMiddleware)
+    return TestClient(app)
+
+
+@pytest.mark.parametrize("url", ["/money?q=%00", "/x%00y", "/money?a=1&b=x%00", "/%00"])
+def test_a_nul_in_the_url_is_a_400(url):
+    assert nul_client().get(url).status_code == 400
+
+
+@pytest.mark.parametrize("url", ["/", "/money?q=100%25", "/money?q=%2500", "/money?q=a%200"])
+def test_other_urls_are_untouched(url):
+    assert nul_client().get(url).status_code == 200
+
+
 # ---- Real legislators were being renamed "Senator" ------------------------------------------
 
 def test_placeholder_roster_rows_are_recognized():
@@ -104,6 +146,7 @@ def test_placeholder_rows_never_overwrite_a_member():
         {"Id": "2", "Name": "Real Person", "FirstName": "Real", "LastName": "Person", "Agency": "House",
          "Party": "D", "District": "1", "LongName": "Representative Person"},
     ])
+    assert len(cur.batches) == 2       # a method that writes nothing must not pass
     for _, rows in cur.batches:
         assert [r[0] for r in rows] == [2]
 
@@ -172,6 +215,107 @@ def test_real_messages_are_not_mistaken_for_spam(message):
     assert not contact.looks_like_spam(message)
 
 
+@pytest.mark.parametrize("message", [
+    "Senator Ann Rivers is not showing up in your search results even though she has 240 bills.",
+    "HB 1234 is not showing up in the search results on your site. Please check it.",
+    "Your bill pages are missing from Google's search index, so people can't find HB 1234 from a search.",
+    # Bill topics, not sales pitches.
+    "The traffic camera bill is not showing up in your search results.",
+    "The bill on price gouging is not showing up in the search results.",
+    "We can't find HB 1500 because it's not showing up in your search results.",
+    "The affordable housing bill is not showing up in your search results.",
+    "The bill on drug pricing is not showing up in the search results.",
+    "The school rankings bill is not showing up in your search results.",
+    "HB 1200 on more traffic cameras is not showing up in your search results.",
+    # Ordinary ways to describe trying the site's search.
+    "I tried to submit a search but HB 1234 is not showing up in your search results.",
+    "I tried several keywords and HB 1234 is not showing up in your search results.",
+])
+def test_reports_about_search_are_not_spam(message):
+    assert not contact.looks_like_spam(message)
+
+
+@pytest.mark.parametrize("message", [
+    "Your site is not showing up in search results. We help businesses like yours, ask for a free audit.",
+    "Your pages are missing from Google's search index. Our team can fix it, see our pricing.",
+    '<a class=x href="https://shop.example/">cheap S E O</a>',
+    "Submit your website to Google's search index today.",
+    "Your site is not showing up in search results. Boost your rankings with affordable packages.",
+    "Your pages are not showing up in search results. Get a quote for organic traffic.",
+])
+def test_sales_pitches_about_search_are_still_held(message):
+    assert contact.looks_like_spam(message)
+
+
+def test_security_reports_are_never_held():
+    payload = "Your search box runs this: <a href=javascript:alert(1)>click</a>"
+    assert contact.looks_like_spam(payload)
+    assert not contact.looks_like_spam(payload, "security")
+
+
+def test_a_security_report_is_emailed_and_held_messages_are_counted_not_quoted(monkeypatch, caplog):
+    configure_email(monkeypatch)
+    rows = [{"id": 1, "topic": "security", "page": None, "name": None, "reply_to": None,
+             "message": "Payload: <a href=javascript:alert(1)>x</a>", "created_at": datetime.now(timezone.utc)},
+            {"id": 2, "topic": "other", "page": None, "name": None, "reply_to": None,
+             "message": 'Buy now <a href="https://secret.example/">here</a>', "created_at": datetime.now(timezone.utc)}]
+    updates, sent = [], []
+
+    class FakeConn:
+        def execute(self, sql, params=()):
+            if sql.lstrip().startswith("SELECT"):
+                return type("R", (), {"fetchall": lambda self: rows})()
+            updates.append((sql.split("email_status = '")[1].split("'")[0], params[-1]))
+
+        def commit(self):
+            pass
+
+    monkeypatch.setattr(contact, "_send", lambda e: sent.append(e))
+    with caplog.at_level(logging.WARNING, logger="wapeople.contact"):
+        stats = contact.send_pending(FakeConn())
+    assert stats == {"contact_sent": 1, "contact_failed": 0, "contact_spam_held": 1}
+    assert updates == [("sent", 1), ("spam", 2)]
+    assert "1 message(s) held" in caplog.text and "secret.example" not in caplog.text
+
+
+def test_the_daily_retention_run_reports_how_many_messages_are_held(caplog):
+    class Result:
+        rowcount = 0
+
+        def fetchone(self):
+            return {"n": 3}
+
+    class FakeConn:
+        def execute(self, sql, params=()):
+            return Result()
+
+        def commit(self):
+            pass
+
+    with caplog.at_level(logging.WARNING, logger="wapeople.contact"):
+        stats = contact.apply_retention(FakeConn())
+    assert stats["contact_spam_on_file"] == 3
+    assert "3 message(s) held" in caplog.text
+
+
+@pytest.mark.parametrize("token", ["1.\u00e9", "9" * 400 + ".abc", "9" * 5000 + ".abc", "\u00b2.abc", "nope", "", ".", "1.\udc80"])
+def test_malformed_form_tokens_are_just_invalid(token):
+    assert contact.token_ok(token) is False
+
+
+def test_a_good_token_still_passes():
+    assert contact.token_ok(contact.form_token(now=1000.0), now=1010.0)
+    assert not contact.token_ok(contact.form_token(now=1000.0), now=1001.0)
+
+
+def test_nul_bytes_never_reach_the_contact_table():
+    clean, errors = contact.validate({"topic": "other", "name": "A\x00B", "email": "a\x00@example.org", "page": "/x\x00",
+                                      "message": "This is a long enough\x00 message to pass."})
+    assert not errors
+    assert not any("\x00" in (v or "") for v in clean.values())
+    assert clean["message"] == "This is a long enough message to pass."
+
+
 def test_spam_is_kept_but_not_emailed(monkeypatch):
     configure_email(monkeypatch)
     rows = [{"id": 1, "topic": "feature", "page": None, "name": None, "reply_to": None,
@@ -237,3 +381,85 @@ def test_opinion_pdf_text_is_extracted():
 def test_missing_and_malformed_pdfs_return_nothing():
     assert pdf_fetcher(httpx.Response(404)).text("https://x/o.pdf") is None
     assert pdf_fetcher(httpx.Response(200, content=b"%PDF-1.4 not really a pdf")).text("https://x/o.pdf") in (None, "")
+
+
+# ---- Number formatting ----------------------------------------------------------------------
+
+def test_values_that_round_to_zero_have_no_minus_sign():
+    from wapeople.web.main import usd, usd_cents, usd_short
+
+    assert usd(-0.4) == "$0" and usd(-0.6) == "-$1" and usd(0) == "$0"
+    assert usd_cents(-0.001) == "$0.00" and usd_cents(-69.93) == "-$69.93"
+    assert usd_short(-0.4) == "$0" and usd_short(-600) == "-$600"
+
+
+@pytest.mark.parametrize("value, label", [
+    (9_999, "$9,999"), (9_999.6, "$10,000"), (10_000, "$10K"), (45_300, "$45K"), (999_499, "$999K"),
+    (999_500, "$1.0M"), (999_950, "$1.0M"), (999_999.99, "$1.0M"), (1_000_000, "$1.0M"), (1_234_567, "$1.2M"),
+    (-999_950, "-$1.0M"), (-45_300, "-$45K"),
+])
+def test_usd_short_at_its_thresholds(value, label):
+    from wapeople.web.main import usd_short
+
+    assert usd_short(value) == label
+
+
+@pytest.mark.parametrize("raw, label", [
+    ("0-29999", "$0–$29,999"), ("500000+", "$500,000 or more"), ("1000000-", "$1,000,000 or more"),
+    ("129042.00", "$129,042.00"), ("311347", "$311,347"), ("1000.50-2000.75", "$1,000.50–$2,000.75"),
+    ("Unknown", "Unknown"), ("\u00b2", "\u00b2"), ("", "—"), (None, "—"),
+])
+def test_range_label(raw, label):
+    from wapeople.web.main import range_label
+
+    assert range_label(raw) == label
+
+
+@pytest.mark.parametrize("raw, label", [
+    ("-69.93", "-$69.93"), ("710.82", "$710.82"), ("$1,200", "$1,200.00"), ("about 50", "about 50"), ("", ""),
+])
+def test_money_text(raw, label):
+    from wapeople.web.main import money_text
+
+    assert money_text(raw) == label
+
+
+@pytest.mark.parametrize("raw, label", [("100", "100%"), ("100%", "100%"), ("20.96", "20.96%"), (".001", ".001%"), ("half", "half")])
+def test_percent_text(raw, label):
+    from wapeople.web.main import percent_text
+
+    assert percent_text(raw) == label
+
+
+def test_filter_numbers_must_be_short_ascii_digits():
+    from wapeople.web.main import year_param
+    from wapeople.web.money_routes import _int
+
+    assert _int("2024") == 2024 and _int("999999999") == 999999999
+    for junk in ("", "0", "abc", "\u00b2", "\u0663", "-1", "1.5", "2147483648", "9" * 5000):
+        assert _int(junk) is None
+    assert year_param("2024") == 2024
+    for junk in ("", "99999", "\u00b2", "\u0663\u0663\u0663\u0663", "20 4"):
+        assert year_param(junk) is None
+
+
+# ---- A page must never wait for a second pooled connection while holding one ------------------
+
+def test_no_route_renders_while_holding_a_connection():
+    """render() takes its own connection. Doing that inside `with conn()` froze the whole site at ten
+    overlapping requests. The integration test watches the pool on pages with data in its fixture;
+    this reads the code, so a route it can't reach is covered too."""
+    import ast
+    import inspect
+
+    from wapeople.web import main, money_routes
+
+    blocks = 0
+    for module in (main, money_routes):
+        for node in ast.walk(ast.parse(inspect.getsource(module))):
+            if isinstance(node, ast.With) and any(getattr(i.context_expr, "func", None) is not None
+                                                  and getattr(i.context_expr.func, "id", "") == "conn" for i in node.items):
+                blocks += 1
+                called = {n.func.id for n in ast.walk(node) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+                assert "render" not in called, f"{module.__name__} line {node.lineno}"
+    assert blocks > 10      # the walk really found the routes

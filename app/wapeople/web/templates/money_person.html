@@ -2,13 +2,11 @@
 {% from "_macros.html" import party, pager %}
 {% from "_money.html" import hbars, source_note with context %}
 {% block title %}{{ p.name }}: money trail{% endblock %}
-{% block description %}{{ p.name }} ({{ p.title }}): {{ p.total_raised | usd }} raised across {{ p.n_campaigns }} campaign{{ "" if p.n_campaigns == 1 else "s" }} on record. Who gave, where it came from, and where it went.{% endblock %}
+{% block description %}{{ p.name }} ({{ p.title }}): {% if p.n_campaigns %}{{ p.total_raised | usd }} raised across {{ p.n_campaigns }} campaign{{ "" if p.n_campaigns == 1 else "s" }} on record. Who gave, where it came from, and where it went.{% else %}not linked to a campaign record on this site.{% endif %}{% endblock %}
 {% block robots %}{% if noindex %}<meta name="robots" content="noindex">{% endif %}{% endblock %}
 {% block content %}
 {% set roll = p.rollup or {} %}
 {% set src = "records=state&" if p.fec_candidate_ids else "" %}
-{% set surplus_balance = surplus_accounts | map(attribute="balance") | select | sum %}
-{% set surplus_spent = surplus_accounts | map(attribute="spent") | select | sum %}
 <nav class="crumbs" aria-label="Breadcrumb"><a href="/money">Money trails</a> › {{ p.name }}</nav>
 <section class="card">
   <div class="member-head">
@@ -32,8 +30,8 @@
 {% endif %}
 {% if not p.n_campaigns %}
 <div class="card empty" style="margin-top:1rem">
-  <h2>No campaign records on file</h2>
-  <p>The Public Disclosure Commission's electronic records don't show a campaign for {{ p.name }}. They begin with the 2009–10 election cycle, so people who last ran before then, and appointees who never ran, won't appear. Older paper filings can be requested from the <a href="https://www.pdc.wa.gov/" rel="noopener">PDC</a>.</p>
+  <h2>No campaign records on file here</h2>
+  <p>{{ p.name }} isn't linked to a Public Disclosure Commission record on this site. That doesn't mean the PDC has none. We link a person only when the name and a campaign for the same seat clearly agree, so campaigns for other offices, or under another form of the name, can go unlinked. The PDC's electronic records also begin with the 2009–10 election cycle, so people who last ran before then, and appointees who never ran, won't appear in them. You can search those records, or request older paper filings, at the <a href="https://www.pdc.wa.gov/" rel="noopener">PDC</a>.</p>
 </div>
 {% else %}
 
@@ -41,9 +39,9 @@
   <div class="trail-step"><div class="n">{{ p.total_raised | usd_short }}</div><div class="l">Raised</div></div>
   <div class="trail-arrow" aria-hidden="true">→</div>
   <div class="trail-step"><div class="n">{{ p.total_spent | usd_short }}</div><div class="l">Spent by campaigns</div></div>
-  {% if surplus_spent %}
+  {% if surplus_paid %}
   <div class="trail-arrow" aria-hidden="true">→</div>
-  <div class="trail-step"><div class="n">{{ surplus_spent | usd_short }}</div><div class="l">Moved out of surplus funds</div></div>
+  <div class="trail-step"><div class="n">{{ surplus_paid | usd_short }}</div><div class="l">Paid out of surplus funds</div></div>
   {% endif %}
   <div class="trail-step trail-side"><div class="n">{% if p.in_state + p.out_of_state > 0 %}{{ (100 * p.in_state / (p.in_state + p.out_of_state)) | round | int }}%{% else %}—{% endif %}</div><div class="l">From Washington</div></div>
 </section>
@@ -62,6 +60,8 @@
     {% if roll.by_source %}{{ hbars(roll.by_source, "type", 1, link=None) }}{% else %}<p class="muted">No itemized contributions on record.</p>{% endif %}
     {% set misc = roll.by_source | default([], true) | selectattr("type", "equalto", "Miscellaneous receipts") | list %}
     {% if misc and misc[0].total > 0 %}<p class="small muted" style="margin:.75rem 0 0">Miscellaneous receipts aren't gifts. They're often the candidate's own money moving from an earlier campaign or surplus account, so it's counted again in the campaign that receives it, plus interest and refunds.</p>{% endif %}
+    {% set own = roll.by_source | default([], true) | selectattr("type", "equalto", "Transfers from the candidate's own accounts") | list %}
+    {% if own and own[0].total > 0 %}<p class="small muted" style="margin:.75rem 0 0">Transfers from the candidate's own accounts aren't new gifts. This money moved from the candidate's surplus account or another of their campaigns, so it's counted again in the campaign that receives it.</p>{% endif %}
     <p class="small muted" style="margin:.75rem 0 0"><a href="?{{ src }}view=contributions">See every contribution →</a></p>
   </section>
   <section class="card">
@@ -268,7 +268,7 @@
 {% else %}<p class="muted">No pledges reported.</p>{% endif %}
 
 {% elif view == "outside" %}
-<p class="muted">Money spent to support or oppose {{ p.name }} by others, without coordinating with the campaign. This table comes from itemized PDC C-6 reports that name the candidate; the campaign's filing totals on the Overview tab can differ because some committees report this spending on other forms.</p>
+<p class="muted">Money spent to support or oppose {{ p.name }} by others, without coordinating with the campaign. This table comes from itemized PDC C-6 reports that name the candidate; the campaign's filing totals on the Overview tab can differ because some committees report this spending on other forms. A row can combine several reports, and its link opens one of them.</p>
 {% if by_sponsor %}
 <div class="table-wrap"><table class="rtable">
   <thead><tr><th scope="col">Year</th><th scope="col">Paid for by</th><th scope="col">Position</th><th scope="col" class="num">Amount for this candidate</th><th scope="col">Dates</th><th scope="col">Report</th></tr></thead>
@@ -299,15 +299,17 @@
 {% endif %}
 
 {% elif view == "surplus" %}
-<p class="muted">Campaigns can move leftover money to a surplus funds account. It can't be used for personal expenses, but it can go to charity, political parties, caucus committees, or future office expenses.</p>
+<p class="muted">Campaigns can move leftover money to a surplus funds account. Under <a href="https://app.leg.wa.gov/rcw/default.aspx?cite=29B.40.090" rel="noopener">RCW 29B.40.090</a>, surplus funds may only be returned to contributors, used to reimburse the candidate's documented lost earnings, given to a political party, a caucus committee or a registered charity, sent to the state treasurer, held for a future campaign for the same office, or kept in a separate account for nonreimbursed public office-related expenses.</p>
 {% if accounts %}
-<section class="stats" aria-label="Surplus account">
-  {% for a in accounts %}
-  <div class="stat"><div class="n">{{ a.raised | usd_short }}</div><div class="l">Received in total</div></div>
-  <div class="stat"><div class="n">{{ a.spent | usd_short }}</div><div class="l">Spent in total</div></div>
+{% for a in accounts %}
+{% if accounts | length > 1 %}<h3 style="margin:1rem 0 .4rem">{{ a.filer_name }}</h3>{% endif %}
+<section class="stats" aria-label="Surplus account{% if accounts | length > 1 %}: {{ a.filer_name }}{% endif %}">
+  <div class="stat"><div class="n">{{ a.raised | usd_short }}</div><div class="l">Received, as of the latest report</div></div>
+  <div class="stat"><div class="n">{{ a.spent | usd_short }}</div><div class="l">Spent, as of the latest report</div></div>
   <div class="stat"><div class="n">{{ a.balance | usd_short }}</div><div class="l">Balance{% if a.thru_date %} as of {{ a.thru_date | date }}{% endif %}{% if a.url %} · <a href="{{ a.url }}" rel="noopener nofollow">report ↗</a>{% endif %}</div></div>
-  {% endfor %}
 </section>
+{% endfor %}
+{% if spending.items %}<p class="small muted" style="margin:.75rem 0 0">Received and spent are the figures on the account's latest report. They can be lower than the payments listed below, which include every itemized payment on record.</p>{% endif %}
 {% endif %}
 {% if spending.items %}
 <p class="result-meta" style="margin-top:1rem">{{ "{:,}".format(spending.total) }} payment{{ "" if spending.total == 1 else "s" }} · {{ spending.extra.total | usd_cents }}</p>
@@ -327,7 +329,7 @@
 {% elif not accounts %}<div class="card empty"><p>No surplus funds account on record.</p></div>{% endif %}
 
 {% elif view == "disclosures" %}
-<p class="muted">Elected officials and candidates file a personal financial affairs statement each year. Dollar amounts are reported in ranges. For privacy, this page leaves out home addresses, the names of family members, and anything reported only for a dependent. The linked filing is the official record.</p>
+<p class="muted">Elected officials file a personal financial affairs statement each year. Candidates and appointees file one when they run or are appointed (<a href="https://app.leg.wa.gov/rcw/default.aspx?cite=29B.55.010" rel="noopener">RCW 29B.55.010</a>). {% if src %}Federal offices are exempt, so anything here comes from state offices or campaigns. {% endif %}Dollar amounts are reported in ranges. For privacy, this page leaves out home addresses, the names of family members, and anything reported only for a dependent. Text that filers typed themselves is cleaned by rules that can miss things, so please <a href="/contact?topic=correction&amp;page={{ path | urlencode }}" rel="nofollow">tell us</a> if you see something private. The linked filing is the official record.</p>
 {% if statements %}
 {% if statement %}
 <form class="filters" method="get">
@@ -350,7 +352,7 @@
   </div>
   <div class="card"><h2>Businesses and organizations</h2>
     {% if d.businesses %}<div class="table-wrap"><table class="rtable"><thead><tr><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Payments reported</th></tr></thead><tbody>
-    {% for x in d.businesses %}<tr><td class="desc"><strong>{{ x.name or "Not stated" }}</strong>{{ who(x) }}{% if x.what %}<span class="sub">{{ x.what }}</span>{% endif %}</td><td data-label="Role">{{ x.position or x.category or "—" }}{% if x.ownership %}<div class="muted small">{{ x.ownership }} owned</div>{% endif %}</td><td data-label="Payments">
+    {% for x in d.businesses %}<tr><td class="desc"><strong>{{ x.name or "Not stated" }}</strong>{{ who(x) }}{% if x.what %}<span class="sub">{{ x.what }}</span>{% endif %}</td><td data-label="Role">{{ x.position or x.category or "—" }}{% if x.ownership %}<div class="muted small">{{ x.ownership | percent_text }} owned</div>{% endif %}</td><td data-label="Payments">
       {% for y in x.paid_by_government %}<div class="small">Government office: {{ y.purpose or "" }}{% if y.amount %} ({{ y.amount | range_label }}){% endif %}</div>{% endfor %}
       {% for y in x.paid_by_state_agencies %}<div class="small">{{ y.agency or "State agency" }}{% if y.purpose %}: {{ y.purpose }}{% endif %}</div>{% endfor %}
       {% for y in x.paid_by_businesses %}<div class="small">{{ y.business or "Business" }}{% if y.purpose %}: {{ y.purpose }}{% endif %}</div>{% endfor %}
@@ -360,7 +362,7 @@
   </div>
   <div class="card"><h2>Gifts received</h2>
     {% if d.gifts %}<div class="table-wrap"><table class="rtable"><thead><tr><th scope="col">From</th><th scope="col">What</th><th scope="col">Date</th><th scope="col" class="num">Value</th></tr></thead><tbody>
-    {% for x in d.gifts %}<tr><td class="desc"><strong>{{ x.donor or "Not stated" }}</strong>{{ who(x) }}{% if x.city %}<span class="sub">{{ x.city }}{% if x.state %}, {{ x.state }}{% endif %}</span>{% endif %}</td><td data-label="What">{{ x.what or "—" }}</td><td data-label="Date" class="nowrap">{{ x.date or "—" }}</td><td data-label="Value" class="num">{% if x.value %}${{ x.value }}{% else %}—{% endif %}</td></tr>{% endfor %}
+    {% for x in d.gifts %}<tr><td class="desc"><strong>{{ x.donor or "Not stated" }}</strong>{{ who(x) }}{% if x.city %}<span class="sub">{{ x.city }}{% if x.state %}, {{ x.state }}{% endif %}</span>{% endif %}</td><td data-label="What">{{ x.what or "—" }}</td><td data-label="Date" class="nowrap">{{ x.date or "—" }}</td><td data-label="Value" class="num">{% if x.value %}{{ x.value | money_text }}{% else %}—{% endif %}</td></tr>{% endfor %}
     </tbody></table></div>{% else %}<p class="muted">None reported.</p>{% endif %}
   </div>
   <div class="card"><h2>Accounts and investments</h2>

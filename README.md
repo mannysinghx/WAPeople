@@ -86,9 +86,13 @@ office has one page with both, on separate tabs (`?records=state`).
   total with the PDC's own and reloads only campaigns that differ (`--full` reloads everything). A first load
   takes 8 to 16 minutes and adds about 420 MB. Results are in `sync_runs`; `mismatched` should be 0.
 - **Privacy:** the sync's `select` lists never name address, phone or email columns, so those never leave the
-  source. `money/disclosure.py` is a whitelist that drops home addresses, family names and anything only about
-  a dependent from financial statements. Itemized donor pages are `noindex` and blocked in `robots.txt`.
-- **Condition of release:** the PDC's data may not be used for commercial purposes (RCW 42.56.070(9)). The site
+  source. Filers also type such details into free-text fields, so `money/clean.py` removes street addresses, PO
+  boxes, phone numbers and email addresses from free text by rule, and shortens ZIP codes to five digits. Those
+  rules can miss things, which the privacy page says plainly, along with how to report one. `money/disclosure.py`
+  is a whitelist that drops home addresses, family names and anything only about a dependent from financial
+  statements, then checks what it keeps against the statement's own spouse, dependent and address fields.
+  Itemized donor pages are `noindex` and blocked in `robots.txt`.
+- **Condition of release:** the PDC's data may not be used for commercial purposes (RCW 42.56.070(8)). The site
   states this on every money page and in the terms. Don't add ads or sell access without reading that first.
 - County and city officials aren't included.
 
@@ -100,7 +104,7 @@ office has one page with both, on separate tabs (`?records=state`).
 | Committees | Candidate-committee linkage `ccl`, committee master `cm`, candidate master `cn` |
 | Contributions | Individual contributions `indiv`, committee contributions to candidates `pas2`, other transactions `oth` |
 | Spending | Operating expenditures `oppexp` (2004 on), plus payments to other committees from `oth` |
-| Outside money | Independent expenditures `independent_expenditure_YYYY.csv` (2010 on) |
+| Outside money | 24- and 48-hour independent expenditure reports `independent_expenditure_YYYY.csv` (2010 on) |
 
 - **Why bulk files, not the API:** no key or sign-up, no rate limit (`DEMO_KEY` allows about 10 requests an hour;
   a free key allows 1,000, or about 100,000 rows an hour), and the transaction files have no street addresses.

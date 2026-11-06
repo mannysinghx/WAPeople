@@ -23,11 +23,19 @@ NICKNAMES = {
     "VICKI": "VICTORIA", "WES": "WESLEY", "ZACK": "ZACHARY",
 }
 CHAMBER_BY_OFFICE = {"STATE REPRESENTATIVE": "House", "STATE SENATOR": "Senate"}
+_NOT_FAMILY_NAMES = {"JR", "SR", "II", "III", "IV", "VON", "VAN", "DE", "DEL", "LA", "LE"}
 
 
 def name_tokens(name: str | None) -> list[str]:
     s = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode().upper()
     return re.sub(r"[^A-Z ]+", " ", s.replace("'", "").replace("-", " ")).split()
+
+
+def surname_tokens(name: str | None, last_name: str | None = None) -> frozenset[str]:
+    """The words of someone's family name. First names stay out: 'Friends of Jane Roe' is not
+    Jane Doe's campaign."""
+    words = name_tokens(last_name) or name_tokens(name)[1:]
+    return frozenset(w for w in words if len(w) > 1 and w not in _NOT_FAMILY_NAMES)
 
 
 def first_name_matches(first: list[str], tokens: set[str]) -> bool:
@@ -92,4 +100,4 @@ def link_member(member: dict, terms: list[dict], people: dict[int, dict],
         return Link(found, "name, chamber and district")
     if len(found) > 1:
         return Link(note=f"Ambiguous: {len(found)} PDC people match this name and seat, so none was linked.")
-    return Link(note="No matching campaign in the PDC's electronic records.")
+    return Link(note="No matching campaign found in the PDC's electronic records by name, chamber and district.")

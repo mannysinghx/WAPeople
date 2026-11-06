@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% from "_money.html" import source_note with context %}
 {% from "_macros.html" import pager %}
-{% block title %}Organizations that fund Washington's elected officials{% endblock %}
-{% block description %}Businesses, unions, PACs, parties and other organizations that gave to Washington State elected officials, and who they gave to.{% endblock %}
+{% block title %}Organizations that fund Washington's state officials{% endblock %}
+{% block description %}Businesses, unions, PACs, parties and other organizations that gave to Washington state officials, and who they gave to, according to Public Disclosure Commission records.{% endblock %}
 {% block content %}
 <nav class="crumbs" aria-label="Breadcrumb"><a href="/money">Money trails</a> › Organizations</nav>
 <h1>Organizations that gave</h1>
-<p class="muted">Businesses, unions, political committees, parties and others, ranked by what they gave to the officials on this site. Names are grouped when they differ only by capitalization, punctuation, or a common abbreviation such as WA or PAC, so an organization can still appear under more than one spelling.</p>
+<p class="muted">Businesses, unions, political committees, parties and others, ranked by what they gave to current and former state officials on this site, according to the PDC. Gifts to federal campaigns aren't counted. Names are grouped when they differ only by capitalization, punctuation, or a common abbreviation such as WA or PAC, so an organization can still appear under more than one spelling.</p>
 <form class="filters" method="get">
   <div class="wide"><label for="o-q">Organization</label><input id="o-q" type="search" name="q" value="{{ f.q }}" placeholder="e.g. Boeing, union, realtors"></div>
   <div><label for="o-t">Type</label>

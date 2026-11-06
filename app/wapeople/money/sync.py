@@ -23,7 +23,7 @@ from ..districts import current_biennium_with_roster, delegations
 from . import clean as C
 from . import client as P
 from .disclosure import from_json
-from .link import Link, group_by_person, link_member
+from .link import Link, group_by_person, link_member, surname_tokens
 
 log = logging.getLogger(__name__)
 
@@ -35,38 +35,54 @@ TRAIL_SOURCE_TYPES = ("Political action committees", "Political parties", "Legis
                       "Other organizations", "Unions")
 TRAIL_MIN_GIVEN = 1000
 TRAIL_MAX_AGE_DAYS = 7
+SHRINK_FLOOR = 10       # Tables and batches smaller than this can change completely in normal use.
+# Shown in a committee's list of funders instead of the names of people coded as organizations.
+PEOPLE_CODED_AS_ORGS = "Individuals coded as organizations"
+# What filers type when they have no employer to give, or their job in place of one. These don't rank.
+EMPLOYER_STOP = (
+    r"^(N[./]?A\.?|NONE( GIVEN)?\.?|NOT APPLICABLE|NOT EMPLO[A-Z]*|UN-?EMPLOYED|UNKNOWN|VARIOUS|RET\.?|RETIRED"
+    r"|SELF|SELF[- ]*EM[A-Z]*|SELF( -|,) .*|OWNER|BUSINESS OWNER|INDEPENDENT|FREELANCE|PRIVATE PRACTICE"
+    r"|HOME|HOME ?MAKER|HOUSEWIFE|STUDENT|ATTORNEY|ATTORNEY AT LAW|CONSULTANT|CONTRACTOR|CEO|PRESIDENT"
+    r"|EXECUTIVE DIRECTOR|MANAGER|ENGINEER|PHYSICIAN|REALTOR|FARMER|[-.?* ]+|(INFO(RMATION)? )?REQUESTED.*)$"
+)
+# Report lines that lump small payments together ('EXPENSES OF $50 OR LESS'): nobody was paid that name.
+PAYEE_LUMP_SUM = r"\$[0-9]|^(PAST |CREDIT )?EXPENSES\M"
+# A real employer has several employees giving; below this it is mostly someone's own small firm.
+MIN_EMPLOYER_DONORS = 3
 
 
 # ---- What to load from each itemized dataset -----------------------------------------------
 # `select` never names an address, phone or email column, so those never leave the source.
 
-def _contribution(r: dict, person: int) -> tuple:
+def _contribution(r: dict, person: int, own_names: frozenset[str] = frozenset()) -> tuple:
     name = C.text(r.get("contributor_name")) or "(name not reported)"
     code, cat = r.get("code"), r.get("contributor_category")
-    org = C.is_org(code, cat, name)
-    if not org:     # A business can be named '515 Park Place LLC'; a person's name holds no address.
-        name = C.free_text(name)
+    occupation = C.free_text(r.get("contributor_occupation"))
+    org = C.is_org(code, cat, name, own_names, occupation)
+    # A business can be named '515 Park Place LLC', so only an address typed after its name goes.
+    name = (C.org_name(name) if org else C.person_name(name)) or "(name not reported)"
     return (int(r["id"]), person, int(r["committee_id"]), C.integer(r.get("election_year")),
             r.get("report_number"), C.text(r.get("origin")), C.money(r.get("amount")),
             C.text(r.get("cash_or_in_kind")), C.day(r.get("receipt_date")), C.text(r.get("primary_general")),
-            C.source_type(code, cat, name), org, name, C.org_key(name) if org else C.name_key(name),
+            C.source_type(code, cat, name, own_names), org, name, C.org_key(name) if org else C.name_key(name),
             C.place(r.get("contributor_city")), C.text(r.get("contributor_state")),
-            C.zip_code(r.get("contributor_zip")), C.free_text(r.get("contributor_occupation")),
+            C.zip_code(r.get("contributor_zip")), occupation,
             C.employer(r.get("contributor_employer_name")), C.place(r.get("contributor_employer_city")),
             C.text(r.get("contributor_employer_state")), C.free_text(r.get("description")),
             C.free_text(r.get("memo")), C.link(r.get("url")))
 
 
-def _expenditure(r: dict, person: int) -> tuple:
+def _expenditure(r: dict, person: int, _own_names: frozenset[str] = frozenset()) -> tuple:
     return (int(r["id"]), person, int(r["committee_id"]), C.integer(r.get("election_year")),
             r.get("report_number"), C.text(r.get("origin")), C.money(r.get("amount")),
             C.text(r.get("itemized_or_non_itemized")), C.day(r.get("expenditure_date")),
-            C.spend_category(r.get("code"), r.get("description")), C.free_text(r.get("description")),
+            C.spend_category(r.get("code"), r.get("description"), r.get("recipient_name")),
+            C.free_text(r.get("description")),
             C.free_text(r.get("recipient_name")), C.place(r.get("recipient_city")),
             C.text(r.get("recipient_state")), C.zip_code(r.get("recipient_zip")), C.link(r.get("url")))
 
 
-def _loan(r: dict, person: int) -> tuple:
+def _loan(r: dict, person: int, _own_names: frozenset[str] = frozenset()) -> tuple:
     return (int(r["id"]), person, int(r["committee_id"]), C.integer(r.get("election_year")),
             r.get("report_number"), C.text(r.get("origin")), C.money(r.get("amount")),
             C.money_or_none(r.get("endorser_liable_amount")), C.text(r.get("cash_or_in_kind")),
@@ -78,7 +94,7 @@ def _loan(r: dict, person: int) -> tuple:
             C.free_text(r.get("description")), C.link(r.get("url")))
 
 
-def _debt(r: dict, person: int) -> tuple:
+def _debt(r: dict, person: int, _own_names: frozenset[str] = frozenset()) -> tuple:
     return (int(r["id"]), person, int(r["committee_id"]), C.integer(r.get("election_year")),
             r.get("report_number"), C.text(r.get("origin")), C.money(r.get("amount")),
             C.text(r.get("record_type")), C.day(r.get("from_date")), C.day(r.get("thru_date")),
@@ -87,7 +103,7 @@ def _debt(r: dict, person: int) -> tuple:
             C.link(r.get("url")))
 
 
-def _pledge(r: dict, person: int) -> tuple:
+def _pledge(r: dict, person: int, _own_names: frozenset[str] = frozenset()) -> tuple:
     return (int(r["id"]), person, int(r["committee_id"]), C.integer(r.get("election_year")),
             r.get("report_number"), C.text(r.get("origin")), C.money(r.get("amount")),
             C.day(r.get("receipt_date")), C.text(r.get("primary_general")), C.text(r.get("code")),
@@ -102,7 +118,7 @@ class ItemSet:
     table: str
     columns: tuple[str, ...]
     select: str
-    convert: Callable[[dict, int], tuple]
+    convert: Callable[[dict, int, frozenset[str]], tuple]
 
 
 COMMON = "id,committee_id,election_year,report_number,origin,amount,url"
@@ -153,15 +169,42 @@ CAMPAIGN_SELECT = (
     "expenditures_amount,loans_amount,pledges_amount,debts_amount,independent_expenditures_for_amount,"
     "independent_expenditures_against_amount,primary_election_status,general_election_status,updated_at,url"
 )
+LEGISLATIVE_CANDIDATE_SELECT = "id,filer_name,office,legislative_district,election_year,person_id"
+ITEM_TOTALS_SELECT = "committee_id,election_year,count(id) as n,sum(amount) as s"
+OUTSIDE_SELECT = ("id,candidate_entity_id,election_year,report_number,sponsor_id,sponsor_name,report_type,"
+                  "report_date,for_or_against,portion_of_amount,url")
+OUTSIDE_FUNDERS_SELECT = ("id,report_number,sponsor_id,sponsor_name,funders_name,funders_first_name,funders_city,"
+                          "funders_state,funders_occupation,funders_employer,amount,date_received,url")
+SURPLUS_SELECT = "id,person_id,filer_name,from_date,thru_date,year,raised,spent,balance,url"
+SURPLUS_SPENDING_SELECT = ("id,person_id,election_year,report_number,amount,itemized_or_non_itemized,"
+                           "expenditure_date,description,recipient_name,recipient_city,recipient_state,url")
+DISCLOSURE_SELECT = "id,submission_id,person_id,receipt_date,period_start,period_end,url"
+DISCLOSURE_DETAILS_SELECT = "id,json"      # Everything in `json` goes through disclosure.py's whitelist.
+COMMITTEE_FILER_SELECT = "id,filer_id,filer_name,committee_acronym"
+COMMITTEE_TOTALS_SELECT = "contributor_category,count(id) as n,sum(amount) as s"
+COMMITTEE_FUNDERS_SELECT = "contributor_name,code,count(id) as n,sum(amount) as s"
+# Every column list this module sends to the PDC. Tests check each one for private columns.
+PDC_SELECTS = tuple(s.select for s in ITEM_SETS) + (
+    CAMPAIGN_SELECT, LEGISLATIVE_CANDIDATE_SELECT, ITEM_TOTALS_SELECT, OUTSIDE_SELECT, OUTSIDE_FUNDERS_SELECT,
+    SURPLUS_SELECT, SURPLUS_SPENDING_SELECT, DISCLOSURE_SELECT, DISCLOSURE_DETAILS_SELECT, COMMITTEE_FILER_SELECT,
+    COMMITTEE_TOTALS_SELECT, COMMITTEE_FUNDERS_SELECT,
+)
 
 
 def _merge_funders(orgs: list[dict], limit: int = 30) -> list[dict]:
     """A committee's organizational funders, with spellings of one name combined and report
-    lump-sum lines (miscellaneous receipts and the like) left out."""
+    lump-sum lines (miscellaneous receipts and the like) left out. Filers code some people as
+    organizations; those are reported as one total, without their names."""
     merged: dict[str, dict] = {}
     for o in orgs:
         name = C.text(o.get("contributor_name"))
         if not name or not C.is_org(o.get("code"), "Organization", name):
+            continue
+        if C.person_shaped(name):
+            people = merged.setdefault("", {"name": PEOPLE_CODED_AS_ORGS, "key": "", "total": 0.0, "n": 0,
+                                            "type": C.SOURCE_LABELS["Individual"]})
+            people["total"] = round(people["total"] + float(C.money(o.get("s"))), 2)
+            people["n"] += int(o.get("n") or 0)
             continue
         key = C.org_key(name)
         m = merged.setdefault(key, {"name": name, "key": key, "total": 0.0, "n": 0,
@@ -193,7 +236,7 @@ class MoneySync:
         to deserve a person looking at it; the data stays as it was."""
         have = self.conn.execute(f"SELECT count(*) AS n FROM {table}").fetchone()["n"]
         self.conn.commit()
-        if have >= 10 and new_count < have / 2:
+        if have >= SHRINK_FLOOR and new_count < have / 2:
             raise SuspiciousSourceData(f"{table}: source returned {new_count} rows, we have {have}. Nothing changed.")
 
     # ---- Full run ---------------------------------------------------------------------------
@@ -224,7 +267,7 @@ class MoneySync:
         offices = P.quoted(LEGISLATIVE_OFFICES)
         candidates = list(self.pdc.rows(
             P.SUMMARY, where=f"office in({offices}) AND filer_type='CA'",
-            select="id,filer_name,office,legislative_district,election_year,person_id"))
+            select=LEGISLATIVE_CANDIDATE_SELECT))
         have_links = self.conn.execute(
             "SELECT count(*) AS n FROM money_people WHERE cardinality(pdc_person_ids) > 0").fetchone()["n"]
         self.conn.commit()
@@ -242,6 +285,7 @@ class MoneySync:
         seats = delegations(self.conn, biennium) if biennium else {}
         current = {m["id"] for d in seats.values() for m in d["senators"] + d["representatives"]}
         manual = roster.get("manual_links", {})
+        member_ids = {r["id"] for r in self.conn.execute("SELECT id FROM members")}
 
         rows: dict[int, dict] = {}
         by_person: dict[int, int] = {}
@@ -279,15 +323,29 @@ class MoneySync:
 
         # Members of Congress: someone who also served in the Legislature keeps one page for both.
         for o in roster.get("federal", []):
-            row = rows.get(o.get("member_id"))
+            member_id = o.get("member_id")
+            row = rows.get(member_id)
+            person_ids = o.get("pdc_person_ids", [])
             fields = dict(name=o["name"], kind="federal", title=o["title"], party=o["party"], is_current=True, chamber=None,
                           district=None, source_url=o["source_url"], fec_candidate_ids=o["fec_candidate_ids"])
             if row:
-                row.update(fields)
-            else:
-                rows[o["id"]] = {"id": o["id"], "member_id": None, "pdc_person_ids": [],
-                                 "link_method": "official roster", "link_note": None, **fields}
+                if person_ids and not row["pdc_person_ids"]:    # The roster has what the name match couldn't find.
+                    row.update(link_method="official roster", link_note=o.get("pdc_note"))
+                row.update(fields, pdc_person_ids=sorted({*row["pdc_person_ids"], *person_ids}))
+                continue
+            # Keep the member's id when their row is missing or blank, as it is until the Legislature
+            # step repairs it, so the page and its federal records stay put when the row comes back.
+            pk = o.get("id") or member_id
+            if pk is None:
+                log.warning("federal roster entry for %s has no id or member_id; skipped", o["name"])
+                continue
+            if member_id:
+                log.warning("no usable member row %s for %s; using the roster entry", member_id, o["name"])
+            rows[pk] = {"id": pk, "member_id": member_id if member_id in member_ids else None,
+                        "pdc_person_ids": list(person_ids), "link_method": "official roster",
+                        "link_note": o.get("pdc_note"), **fields}
 
+        self._check_shrink("money_people", len(rows))
         with self.conn.cursor() as cur:
             cur.execute("DELETE FROM money_people WHERE NOT (id = ANY(%s))", (list(rows),))
             cur.executemany(
@@ -366,6 +424,14 @@ class MoneySync:
         self.conn.commit()
         return {"campaigns": len(seen)}
 
+    def _own_names(self) -> dict[int, frozenset[str]]:
+        """Each official's family name as words, for recognizing their own money among contributions."""
+        rows = self.conn.execute(
+            "SELECT p.id, p.name, m.last_name FROM money_people p LEFT JOIN members m ON m.id = p.member_id"
+        ).fetchall()
+        self.conn.commit()
+        return {r["id"]: surname_tokens(r["name"], r["last_name"]) for r in rows}
+
     def _committee_people(self) -> dict[int, int]:
         rows = self.conn.execute(
             "SELECT committee_id, min(person_pk) AS person_pk FROM money_campaigns"
@@ -380,7 +446,7 @@ class MoneySync:
         out: dict[tuple, tuple] = {}
         for batch in P.chunks(committees, 200):
             for r in self.pdc.get(
-                dataset, select="committee_id,election_year,count(id) as n,sum(amount) as s",
+                dataset, select=ITEM_TOTALS_SELECT,
                 where=f"committee_id in({P.quoted(batch)})", group="committee_id,election_year",
                 limit=50000,
             ):
@@ -398,7 +464,10 @@ class MoneySync:
 
     def sync_items(self, spec: ItemSet, full: bool = False, reload_since: int | None = None) -> dict:
         owners = self._committee_people()
+        own_names = self._own_names()
         committees = sorted(owners)
+        remote = self._remote_totals(spec.dataset, committees)
+        self._check_shrink(spec.table, sum(v[0] for v in remote.values()))
         with self.conn.cursor() as cur:
             # A committee can change hands only if a link was corrected: follow it, or drop it.
             cur.execute(f"DELETE FROM {spec.table} WHERE NOT (committee_id = ANY(%s))", (committees,))
@@ -408,7 +477,6 @@ class MoneySync:
                 " WHERE t.committee_id = c.committee_id AND t.person_pk <> c.person_pk"
             )
         self.conn.commit()
-        remote = self._remote_totals(spec.dataset, committees)
         local = self._local_totals(spec.table)
         stale = {k[0] for k in set(remote) | set(local) if remote.get(k) != local.get(k)}
         if full:
@@ -421,7 +489,9 @@ class MoneySync:
             for r in self.pdc.rows(spec.dataset, where=f"committee_id in({P.quoted(batch)})", select=spec.select):
                 cid = C.integer(r.get("committee_id"))
                 if cid in owners and C.integer(r.get("id")) is not None:
-                    rows.append(spec.convert(r, owners[cid]))
+                    person = owners[cid]
+                    rows.append(spec.convert(r, person, own_names.get(person, frozenset())))
+            self._check_batch(spec.table, batch, len(rows), remote, local)
             self._replace(spec, batch, rows)
             loaded += len(rows)
         after = self._local_totals(spec.table)
@@ -432,6 +502,18 @@ class MoneySync:
                         spec.table, len(mismatched), mismatched[:5])
         return {"committees_reloaded": len(stale), "rows_loaded": loaded, "rows_total": sum(v[0] for v in after.values()),
                 "mismatched": len(mismatched)}
+
+    @staticmethod
+    def _check_batch(table: str, batch: list[int], got: int, remote: dict[tuple, tuple], local: dict[tuple, tuple]) -> None:
+        """The same stop for one batch of campaigns, because a whole-table count can't see one bad
+        page of results. A few rows the PDC itself no longer lists are a real correction and go through."""
+        committees = set(batch)
+        expected = sum(v[0] for k, v in remote.items() if k[0] in committees)
+        have = sum(v[0] for k, v in local.items() if k[0] in committees)
+        if got < expected / 2 or (not got and have >= SHRINK_FLOOR):
+            raise SuspiciousSourceData(
+                f"{table}: source returned {got} rows for {len(batch)} campaigns; it reports {expected} and we have"
+                f" {have}. This batch was not changed.")
 
     def _replace(self, spec: ItemSet, committees: list[int], rows: list[tuple]) -> None:
         columns = ", ".join(spec.columns)
@@ -454,9 +536,7 @@ class MoneySync:
         rows, reports = [], set()
         for batch in P.chunks(sorted(people), 150):
             where = f"candidate_entity_id in({P.quoted(batch)}) AND origin like 'C6.3%'"
-            select = ("id,candidate_entity_id,election_year,report_number,sponsor_id,sponsor_name,report_type,"
-                      "report_date,for_or_against,portion_of_amount,url")
-            for r in self.pdc.rows(P.OUTSIDE, where=where, select=select):
+            for r in self.pdc.rows(P.OUTSIDE, where=where, select=OUTSIDE_SELECT):
                 pid = C.integer(r.get("candidate_entity_id"))
                 if pid in people:
                     rows.append((r["id"], people[pid], C.integer(r.get("election_year")), r.get("report_number"),
@@ -467,9 +547,7 @@ class MoneySync:
         funders = []
         for batch in P.chunks(sorted(x for x in reports if x), 150):
             where = f"report_number in({P.quoted(batch)}) AND origin like 'C6.5%'"
-            select = ("id,report_number,sponsor_id,sponsor_name,funders_name,funders_first_name,funders_city,"
-                      "funders_state,funders_occupation,funders_employer,amount,date_received,url")
-            for r in self.pdc.rows(P.OUTSIDE, where=where, select=select):
+            for r in self.pdc.rows(P.OUTSIDE, where=where, select=OUTSIDE_FUNDERS_SELECT):
                 name = " ".join(x for x in (C.free_text(r.get("funders_first_name")),
                                             C.free_text(r.get("funders_name"))) if x)
                 funders.append((r["id"], r["report_number"], r.get("sponsor_id"), C.text(r.get("sponsor_name")),
@@ -477,6 +555,7 @@ class MoneySync:
                                 C.free_text(r.get("funders_occupation")), C.employer(r.get("funders_employer")),
                                 C.money(r.get("amount")), C.day(r.get("date_received")), C.link(r.get("url"))))
         self._check_shrink("money_outside", len(rows))
+        self._check_shrink("money_outside_funders", len(funders))
         with self.conn.cursor() as cur:
             cur.execute("DELETE FROM money_outside")
             cur.execute("DELETE FROM money_outside_funders")
@@ -498,15 +577,12 @@ class MoneySync:
         accounts, spending = [], []
         for batch in P.chunks(sorted(people), 150):
             where = f"person_id in({P.quoted(batch)})"
-            for r in self.pdc.rows(P.SURPLUS, where=where,
-                                   select="id,person_id,filer_name,from_date,thru_date,year,raised,spent,balance,url"):
+            for r in self.pdc.rows(P.SURPLUS, where=where, select=SURPLUS_SELECT):
                 accounts.append((r["id"], people[C.integer(r["person_id"])], C.text(r.get("filer_name")),
                                  C.day(r.get("from_date")), C.day(r.get("thru_date")), C.integer(r.get("year")),
                                  C.money_or_none(r.get("raised")), C.money_or_none(r.get("spent")),
                                  C.money_or_none(r.get("balance")), C.link(r.get("url"))))
-            for r in self.pdc.rows(P.SURPLUS_SPENDING, where=where,
-                                   select="id,person_id,election_year,report_number,amount,itemized_or_non_itemized,"
-                                          "expenditure_date,description,recipient_name,recipient_city,recipient_state,url"):
+            for r in self.pdc.rows(P.SURPLUS_SPENDING, where=where, select=SURPLUS_SPENDING_SELECT):
                 spending.append((int(r["id"]), people[C.integer(r["person_id"])], C.integer(r.get("election_year")),
                                  r.get("report_number"), C.money(r.get("amount")),
                                  C.text(r.get("itemized_or_non_itemized")), C.day(r.get("expenditure_date")),
@@ -533,36 +609,66 @@ class MoneySync:
         people = self._person_ids()
         remote: dict[int, dict] = {}
         for batch in P.chunks(sorted(people), 150):
-            for r in self.pdc.rows(P.DISCLOSURES, where=f"person_id in({P.quoted(batch)})",
-                                   select="id,person_id,receipt_date,period_start,period_end,url"):
+            for r in self.pdc.rows(P.DISCLOSURES, where=f"person_id in({P.quoted(batch)})", select=DISCLOSURE_SELECT):
                 i = C.integer(r.get("id"))
                 if i is not None:
                     remote[i] = r
         self._check_shrink("money_disclosures", len(remote))
-        local = {r["id"] for r in self.conn.execute("SELECT id FROM money_disclosures")}
+        local = {r["id"]: r["submission_id"] for r in self.conn.execute("SELECT id, submission_id FROM money_disclosures")}
         self.conn.commit()
-        new = sorted(set(remote) - local)
+        # An amended statement keeps its id and gets a new submission_id, so that's how we notice it.
+        changed = sorted(i for i, r in remote.items()
+                         if i not in local or C.text(r.get("submission_id")) != local[i])
         details: dict[int, dict | None] = {}
-        for batch in P.chunks(new, 100):
-            for r in self.pdc.rows(P.DISCLOSURES, where=f"id in({P.quoted(batch)})", select="id,json"):
+        for batch in P.chunks(changed, 100):
+            for r in self.pdc.rows(P.DISCLOSURES, where=f"id in({P.quoted(batch)})", select=DISCLOSURE_DETAILS_SELECT):
                 details[int(r["id"])] = from_json(r.get("json"))
+        owners = {i: people[C.integer(r["person_id"])] for i, r in remote.items()}
         with self.conn.cursor() as cur:
             cur.execute("DELETE FROM money_disclosures WHERE NOT (id = ANY(%s))", (list(remote),))
+            # A statement the details request didn't return keeps what it has and is tried again next run.
             cur.executemany(
-                "INSERT INTO money_disclosures (id, person_pk, receipt_date, period_start, period_end, url, details)"
-                " VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO UPDATE SET person_pk = EXCLUDED.person_pk",
-                [(i, people[C.integer(remote[i]["person_id"])], C.day(remote[i].get("receipt_date")),
-                  C.day(remote[i].get("period_start")), C.day(remote[i].get("period_end")),
-                  C.link(remote[i].get("url")), Jsonb(details[i]) if details.get(i) else None) for i in new],
+                "INSERT INTO money_disclosures (id, submission_id, person_pk, receipt_date, period_start, period_end,"
+                " url, details) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO UPDATE SET"
+                " submission_id = EXCLUDED.submission_id, receipt_date = EXCLUDED.receipt_date,"
+                " period_start = EXCLUDED.period_start, period_end = EXCLUDED.period_end, url = EXCLUDED.url,"
+                " details = coalesce(EXCLUDED.details, money_disclosures.details)",
+                [(i, C.text(remote[i].get("submission_id")) if i in details else local.get(i), owners[i],
+                  C.day(remote[i].get("receipt_date")), C.day(remote[i].get("period_start")),
+                  C.day(remote[i].get("period_end")), C.link(remote[i].get("url")),
+                  Jsonb(details[i]) if details.get(i) else None) for i in changed],
+            )
+            # A corrected link moves every statement, including the ones that didn't change.
+            cur.execute(
+                "UPDATE money_disclosures d SET person_pk = v.pk FROM unnest(%s::bigint[], %s::int[]) AS v(id, pk)"
+                " WHERE d.id = v.id AND d.person_pk <> v.pk",
+                (list(owners), list(owners.values())),
             )
         self.conn.commit()
-        return {"disclosures": len(remote), "disclosures_new": len(new)}
+        return {"disclosures": len(remote), "disclosures_new": len(changed)}
 
     # ---- Rollups the pages read -------------------------------------------------------------
+
+    def _people_coded_as_orgs(self) -> list[str]:
+        """Names filers coded as organizations that are really people, so they aren't listed as
+        organizations. One filer reporting a name as an individual doesn't make it a person: that would
+        take away the House Democratic Campaign Committee, Microsoft and hundreds more. Most of them doing
+        it does, unless the name says otherwise, as '26th Legislative District Democrats' does."""
+        rows = self.conn.execute(
+            "SELECT o.key, o.name, o.n, coalesce(i.n, 0) AS as_person FROM ("
+            "  SELECT contributor_key AS key, mode() WITHIN GROUP (ORDER BY contributor_name) AS name, count(*) AS n"
+            "  FROM money_contributions WHERE is_org AND contributor_key <> '' GROUP BY 1) o"
+            " LEFT JOIN (SELECT contributor_key AS key, count(*) AS n FROM money_contributions"
+            "  WHERE NOT is_org GROUP BY 1) i USING (key)"
+        ).fetchall()
+        # The filed name, not the key: the key drops LLC and INC, and that turns 'WHITNEY LANE LLC' into a person.
+        return [r["key"] for r in rows if C.person_shaped(r["name"])
+                or (r["as_person"] >= r["n"] and not C.reads_as_org(r["name"]))]
 
     def rebuild_rollups(self) -> dict:
         c = self.conn
         roll: dict[int, dict] = {}
+        people_as_orgs = self._people_coded_as_orgs()
 
         def add(key: str, rows) -> None:
             for r in rows:
@@ -591,15 +697,20 @@ class MoneySync:
             " mode() WITHIN GROUP (ORDER BY source_type) AS type,"
             " sum(amount) AS total, count(*) AS n,"
             " row_number() OVER (PARTITION BY person_pk ORDER BY sum(amount) DESC) AS rn"
-            " FROM money_contributions WHERE is_org AND contributor_key <> '' GROUP BY 1, 2) t"
-            " WHERE rn <= 25 ORDER BY 1, 5 DESC"))
+            " FROM money_contributions WHERE is_org AND contributor_key <> '' AND NOT (contributor_key = ANY(%s))"
+            " GROUP BY 1, 2) t WHERE rn <= 25 ORDER BY 1, 5 DESC", (people_as_orgs,)))
+        # A self-employed donor often types their own name as the employer. Comparing words catches
+        # 'Michael Murr' and 'Michael Murr LLC' for the donor MURR MICHAEL.
         add("top_employers", c.execute(
             "SELECT person_pk, employer, total, n FROM ("
             " SELECT person_pk, max(employer) AS employer, sum(amount) AS total, count(*) AS n,"
             " row_number() OVER (PARTITION BY person_pk ORDER BY sum(amount) DESC) AS rn"
-            " FROM money_contributions WHERE NOT is_org AND employer IS NOT NULL"
-            " AND upper(employer) !~ '^(N/?A|NONE|NOT EMPLOYED|UNEMPLOYED|RETIRED|SELF|SELF[- ]EMPLOYED|HOMEMAKER|-+|INFORMATION REQUESTED.*)$'"
-            " GROUP BY person_pk, upper(employer)) t WHERE rn <= 15 ORDER BY 1, 3 DESC"))
+            " FROM (SELECT *, string_to_array(contributor_key, ' ') AS donor,"
+            "   array_remove(regexp_split_to_array(replace(upper(employer), chr(39), ''), '[^A-Z0-9]+'), '') AS works"
+            "   FROM money_contributions WHERE NOT is_org AND employer IS NOT NULL AND upper(employer) !~ %s) m"
+            " WHERE NOT (donor <@ works OR works <@ donor)"
+            " GROUP BY person_pk, upper(employer) HAVING count(DISTINCT contributor_key) >= %s) t"
+            " WHERE rn <= 15 ORDER BY 1, 3 DESC", (EMPLOYER_STOP, MIN_EMPLOYER_DONORS)))
         add("by_spend", c.execute(
             "SELECT person_pk, category, sum(amount) AS total, count(*) AS n FROM money_expenditures"
             " GROUP BY 1, 2 ORDER BY 1, 3 DESC"))
@@ -607,8 +718,10 @@ class MoneySync:
             "SELECT person_pk, name, total, n FROM ("
             " SELECT person_pk, max(recipient_name) AS name, sum(amount) AS total, count(*) AS n,"
             " row_number() OVER (PARTITION BY person_pk ORDER BY sum(amount) DESC) AS rn"
-            " FROM money_expenditures WHERE recipient_name IS NOT NULL GROUP BY person_pk, upper(recipient_name)) t"
-            " WHERE rn <= 15 ORDER BY 1, 3 DESC"))
+            " FROM money_expenditures WHERE recipient_name IS NOT NULL AND category <> 'Contribution Refunds'"
+            " AND coalesce(description, '') !~* '\\mrefund' AND itemized IS DISTINCT FROM 'Non-itemized'"
+            " AND upper(recipient_name) !~ %s"
+            " GROUP BY person_pk, upper(recipient_name)) t WHERE rn <= 15 ORDER BY 1, 3 DESC", (PAYEE_LUMP_SUM,)))
         for person in roll.values():
             for org in person.get("top_orgs", []):
                 if org["key"] in C.ORG_DISPLAY_NAMES:
@@ -659,7 +772,8 @@ class MoneySync:
                 " SELECT contributor_key, mode() WITHIN GROUP (ORDER BY contributor_name),"
                 " mode() WITHIN GROUP (ORDER BY source_type),"
                 " sum(amount), count(*), count(DISTINCT person_pk), max(receipt_date)"
-                " FROM money_contributions WHERE is_org AND contributor_key <> '' GROUP BY 1"
+                " FROM money_contributions WHERE is_org AND contributor_key <> '' AND NOT (contributor_key = ANY(%s))"
+                " GROUP BY 1", (people_as_orgs,)
             )
             orgs = cur.rowcount
             cur.execute("UPDATE money_orgs SET name = key WHERE key = ANY(%s)", (list(C.ORG_DISPLAY_NAMES),))
@@ -675,12 +789,13 @@ class MoneySync:
         fresh = {r["key"] for r in self.conn.execute(
             "SELECT key FROM money_committee_sources WHERE synced_at > now() - make_interval(days => %s)",
             (TRAIL_MAX_AGE_DAYS,))}
+        with_money = {r["key"] for r in self.conn.execute("SELECT key FROM money_committee_sources WHERE total_received > 0")}
         self.conn.commit()
         if not wanted:
             return {"committee_sources": 0}
         filers: dict[str, dict] = {}
         acronyms: dict[str, set[str]] = {}
-        for r in self.pdc.rows(P.SUMMARY, where="filer_type='CO'", select="id,filer_id,filer_name,committee_acronym"):
+        for r in self.pdc.rows(P.SUMMARY, where="filer_type='CO'", select=COMMITTEE_FILER_SELECT):
             key = C.org_key(r.get("filer_name"))
             if key and r.get("filer_id"):
                 f = filers.setdefault(key, {"name": C.text(r.get("filer_name")), "ids": set()})
@@ -693,6 +808,7 @@ class MoneySync:
             if acronym in wanted and acronym not in filers and len(keys) == 1:
                 filers[acronym] = filers[next(iter(keys))]
         filers = {k: v for k, v in filers.items() if k in wanted}
+        self._check_shrink("money_committee_sources", len(filers))
         self.conn.execute("DELETE FROM money_committee_sources WHERE NOT (key = ANY(%s))", (list(filers),))
         self.conn.commit()
         todo = [k for k in filers if k not in fresh][:limit]
@@ -704,14 +820,16 @@ class MoneySync:
             if group not in fetched:
                 ids = P.quoted(sorted(group))
                 totals = self.pdc.get(
-                    P.CONTRIBUTIONS, select="contributor_category,count(id) as n,sum(amount) as s",
+                    P.CONTRIBUTIONS, select=COMMITTEE_TOTALS_SELECT,
                     where=f"filer_id in({ids})", group="contributor_category", limit=10)
                 orgs = self.pdc.get(
-                    P.CONTRIBUTIONS, select="contributor_name,code,count(id) as n,sum(amount) as s",
+                    P.CONTRIBUTIONS, select=COMMITTEE_FUNDERS_SELECT,
                     where=f"filer_id in({ids}) AND contributor_category='Organization'",
                     group="contributor_name,code", order="s DESC", limit=80)
                 fetched[group] = (totals, _merge_funders(orgs))
             totals, funders = fetched[group]
+            if not totals and key in with_money:    # An empty answer isn't news: keep what we have.
+                continue
             people = next((t for t in totals if t.get("contributor_category") == "Individual"), {})
             self.conn.execute(
                 "INSERT INTO money_committee_sources (key, committee_name, filer_ids, total_received,"

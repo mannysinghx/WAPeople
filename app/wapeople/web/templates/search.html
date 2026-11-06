@@ -18,9 +18,18 @@
 </section>
 {% endif %}
 
+{% if officials %}
+<section style="margin-bottom:1.5rem">
+  <h2>Statewide officials, justices and members of Congress</h2>
+  <div class="chips">
+    {% for o in officials %}<a class="chip" href="/money/{{ o.id }}"><strong>{{ o.name }}</strong> <span class="small">{% if o.party in ("D", "R") %}{{ party(o.party) }} · {% endif %}{{ o.title }}</span></a>{% endfor %}
+  </div>
+</section>
+{% endif %}
+
 {% if orgs %}
 <section style="margin-bottom:1.5rem">
-  <h2>Organizations that gave to officials</h2>
+  <h2>Organizations that gave to state officials</h2>
   <div class="chips">
     {% for o in orgs %}<a class="chip" href="/money/organizations/{{ o.key | org_slug }}"><strong>{{ o.name }}</strong> <span class="small muted">{{ o.total | usd }}</span></a>{% endfor %}
   </div>

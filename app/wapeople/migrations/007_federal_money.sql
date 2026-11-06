@@ -139,12 +139,14 @@ CREATE TABLE fec_outside (
 CREATE INDEX fec_outside_person_idx ON fec_outside (person_pk, cycle DESC, amount DESC);
 CREATE INDEX fec_outside_load_idx ON fec_outside (cycle);
 
--- Which version of each public file is loaded, so unchanged files are never read again.
+-- Which version of each public file is loaded, so unchanged files are never read again. Rows are
+-- filtered to the roster as they're read, so a changed roster (candidate id:person id) means a reload.
 CREATE TABLE fec_sync_state (
     dataset    text NOT NULL,
     cycle      int  NOT NULL,
     etag       text,
     rows       int  NOT NULL DEFAULT 0,
+    roster     text[] NOT NULL DEFAULT '{}',
     loaded_at  timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (dataset, cycle)
 );

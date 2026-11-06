@@ -32,6 +32,7 @@ from .money.sync import MoneySync
 from .runs import tracked_run
 
 log = logging.getLogger("wapeople.sync")
+RETRY_WAIT_S = 3 * 3600     # After a failure, wait this long rather than hammering the source.
 
 
 def sync_legislature(bienniums: list[str], details: bool = True, force_details: bool = False,
@@ -196,12 +197,10 @@ def refresh(today: date | None = None) -> None:
         raise RuntimeError(f"refresh steps failed: {', '.join(failed)}")
 
 
-def last_ok(job_scope: str) -> datetime | None:
+def last_finished(job: str) -> datetime | None:
+    """When a job last ran to the end, whether or not every part of it worked."""
     with connect() as conn:
-        row = conn.execute(
-            "SELECT max(finished_at) AS t FROM sync_runs WHERE status = 'ok' AND (job || ':' || coalesce(scope,'')) LIKE %s",
-            (job_scope,),
-        ).fetchone()
+        row = conn.execute("SELECT max(finished_at) AS t FROM sync_runs WHERE job = %s", (job,)).fetchone()
     return row["t"] if row else None
 
 
@@ -216,21 +215,29 @@ def daily() -> None:
 
 def schedule() -> None:
     migrate()
-    last_attempt = 0.0
+    last_attempt = court_retry_at = 0.0
     while True:
         try:
             if incomplete_bienniums():
                 initial()
-            elif court_backfill_due():
-                sync_courts()
+            elif time.time() >= court_retry_at and court_backfill_due():
+                try:
+                    sync_courts()
+                except Exception:
+                    # Court data is independent of everything else; don't let it block the daily refresh.
+                    court_retry_at = time.time() + RETRY_WAIT_S
+                    log.exception("court backfill failed; will try again in a few hours")
             now = datetime.now().astimezone()
-            last = last_ok("courts:refresh")
+            # Due once a day however the last one went: a step that failed, such as courts without a
+            # token, tries again tomorrow rather than repeating every other source today.
+            last = last_finished("refresh")
             due = last is None or (now - last).total_seconds() > 20 * 3600
-            # After a failed attempt, wait a few hours rather than hammering the sources.
-            if due and now.hour >= SYNC_HOUR_LOCAL and time.time() - last_attempt > 3 * 3600:
+            # A refresh that died partway records no finish; wait a few hours before starting another.
+            if due and now.hour >= SYNC_HOUR_LOCAL and time.time() - last_attempt > RETRY_WAIT_S:
                 last_attempt = time.time()
                 log.info("daily refresh starting")
-                refresh()
+                with tracked_run("refresh", "daily"):
+                    refresh()
         except Exception:
             log.exception("sync cycle failed; will retry")
             time.sleep(1800)

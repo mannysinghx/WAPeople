@@ -160,15 +160,16 @@ class FecBulk:
         finally:
             source.close()
 
-    def rows(self, name: str, wanted: frozenset[bytes] | None = None) -> Iterator[list[str]]:
+    def rows(self, name: str, wanted: frozenset[bytes] | None = None, info: FileInfo | None = None) -> Iterator[list[str]]:
         """Pipe-separated rows. `wanted` keeps only rows whose first field (9 characters: a committee
-        or candidate id) is listed, which skips decoding the tens of millions of rows we don't need."""
-        for line in self.zip_lines(name):
+        or candidate id) is listed, which skips decoding the tens of millions of rows we don't need.
+        Given `info`, the file is known to exist, so a 403 or 404 raises instead of reading as empty."""
+        for line in self.zip_lines(name, info):
             if wanted is None or line[:9] in wanted:
                 yield line.decode("utf-8", "replace").rstrip("\r\n").split("|")
 
-    def csv_rows(self, name: str) -> Iterator[dict]:
-        info = self.info(name)
+    def csv_rows(self, name: str, info: FileInfo | None = None) -> Iterator[dict]:
+        info = info or self.info(name)
         if info is None:
             return
         with self.http.stream("GET", info.url) as response:

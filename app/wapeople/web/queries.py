@@ -70,6 +70,11 @@ class Page:
         return max(1, -(-self.total // self.page_size))
 
 
+def clamp_page(page: int, total: int, page_size: int = PAGE_SIZE) -> int:
+    """A page past the end shows the last page, so a list with records never reads as empty."""
+    return min(page, max(1, -(-total // page_size)))
+
+
 def parse_bill_ref(q: str) -> tuple[str | None, int] | None:
     """'ESSB 5096' -> ('SB', 5096); '1217' -> (None, 1217)."""
     m = _BILL_REF_RE.match(q or "")
@@ -91,10 +96,19 @@ def bienniums(c: psycopg.Connection) -> list[dict]:
 
 
 def last_updates(c: psycopg.Connection) -> dict:
+    """Newest refresh per job. For the money jobs that means data actually loaded: a daily run that
+    finds nothing new mustn't make old figures look fresh."""
     rows = c.execute(
         "SELECT job, max(finished_at) AS t FROM sync_runs WHERE status = 'ok' GROUP BY job"
     ).fetchall()
-    return {r["job"]: r["t"] for r in rows}
+    updates = {r["job"]: r["t"] for r in rows}
+    updates["fec"] = c.execute("SELECT max(loaded_at) AS t FROM fec_sync_state").fetchone()["t"]
+    # Each dataset's stats are nested under its table name, with rows_loaded inside.
+    updates["money"] = c.execute(
+        "SELECT max(finished_at) AS t FROM sync_runs"
+        " WHERE job = 'money' AND status = 'ok' AND stats @? '$.* ? (@.rows_loaded > 0)'"
+    ).fetchone()["t"]
+    return updates
 
 
 def home_counts(c: psycopg.Connection, current: str | None) -> dict:
@@ -183,6 +197,7 @@ def search_bills(
 
     w = " WHERE " + " AND ".join(where)
     total = c.execute("SELECT count(*) AS n" + BILL_LIST_FROM + w, params).fetchone()["n"]
+    page = clamp_page(page, total, page_size)
     if sort == "relevance" and rank_sql:
         order = f"{rank_sql} DESC, b.last_action_date DESC NULLS LAST"
     else:
@@ -318,6 +333,39 @@ def list_members(
     ).fetchall()
 
 
+def left_during_term(c: psycopg.Connection, biennium: str) -> set[int]:
+    """Members the records show left their seat mid-term. These are statements about named officials,
+    so it takes all three: they voted, the people filling the seat voted later (the second-latest
+    voter for a House district's two seats), and they don't hold that seat next session. Ties and
+    members with no votes get no label."""
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}", biennium):
+        return set()
+    start = int(biennium[:4])
+    rows = c.execute(
+        """
+        WITH lv AS (
+            SELECT v.member_id, max(rc.vote_date) AS last_vote
+            FROM votes v JOIN roll_calls rc ON rc.id = v.roll_call_id
+            WHERE rc.biennium = %(b)s
+            GROUP BY v.member_id
+        ), seats AS (
+            SELECT t.member_id, t.agency, t.district, lv.last_vote,
+                   nth_value(lv.last_vote, CASE t.agency WHEN 'Senate' THEN 1 ELSE 2 END) OVER (
+                       PARTITION BY t.agency, t.district ORDER BY lv.last_vote DESC NULLS LAST
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS seat_last_vote
+            FROM member_terms t LEFT JOIN lv ON lv.member_id = t.member_id
+            WHERE t.biennium = %(b)s AND t.district ~ '^[0-9]+$' AND t.agency IN ('Senate', 'House')
+        )
+        SELECT s.member_id FROM seats s
+        WHERE s.last_vote < s.seat_last_vote AND NOT EXISTS (
+            SELECT 1 FROM member_terms n WHERE n.member_id = s.member_id AND n.biennium = %(next)s
+            AND n.agency = s.agency AND n.district = s.district)
+        """,
+        {"b": biennium, "next": f"{start + 2}-{(start + 3) % 100:02d}"},
+    ).fetchall()
+    return {r["member_id"] for r in rows}
+
+
 def get_member(c: psycopg.Connection, member_id: int) -> dict | None:
     m = c.execute("SELECT * FROM members WHERE id = %s", (member_id,)).fetchone()
     if not m:
@@ -374,6 +422,7 @@ def member_votes(
     w = " WHERE " + " AND ".join(where)
     frm = " FROM votes v JOIN roll_calls rc ON rc.id = v.roll_call_id JOIN bills b ON b.id = rc.bill_pk"
     total = c.execute("SELECT count(*) AS n" + frm + w, params).fetchone()["n"]
+    page = clamp_page(page, total)
     params.update(limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE)
     items = c.execute(
         "SELECT v.vote, rc.id AS roll_call_id, rc.vote_date, rc.agency, rc.motion, rc.yeas, rc.nays,"
@@ -415,6 +464,7 @@ def list_roll_calls(
     w = " WHERE " + " AND ".join(where)
     frm = " FROM roll_calls rc JOIN bills b ON b.id = rc.bill_pk"
     total = c.execute("SELECT count(*) AS n" + frm + w, params).fetchone()["n"]
+    page = clamp_page(page, total)
     params.update(limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE)
     items = c.execute(
         "SELECT rc.*, b.bill_id, b.short_description, b.stage_label, b.bill_number" + frm + w +
@@ -478,6 +528,7 @@ def search_cases(
         where.append("EXISTS (SELECT 1 FROM case_bill_links l WHERE l.case_id = cc.id)")
     w = " WHERE " + " AND ".join(where)
     total = c.execute("SELECT count(*) AS n FROM court_cases cc" + w, params).fetchone()["n"]
+    page = clamp_page(page, total, page_size)
     order = (f"{rank_sql} DESC, cc.date_filed DESC" if sort == "relevance" and rank_sql
              else CASE_SORTS.get(sort) or CASE_SORTS["newest"])
     params.update(limit=page_size, offset=(page - 1) * page_size)

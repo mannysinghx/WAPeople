@@ -11,12 +11,13 @@
   </li>
   {% endfor %}
 </ul>
+{% if shown | selectattr("total", "lt", -0.5) | list %}<p class="small muted" style="margin:.5rem 0 0">A negative amount is a refund or a correction to an earlier report.</p>{% endif %}
 {%- endmacro %}
 
 {% macro source_note() -%}
 <div class="source-note small muted">
   <p><strong>A contribution is not an accusation.</strong> These are campaign finance reports as filed with the Washington Public Disclosure Commission. They show who gave and how much. They don't show that anyone received anything in return.</p>
-  <p>Condition of release, from the PDC: this data constitutes a list of individuals and may not be used for commercial purposes (<a href="https://app.leg.wa.gov/rcw/default.aspx?cite=42.56.070" rel="noopener">RCW 42.56.070</a>). <a href="/about#money">How this data works</a> · <a href="/contact?topic=correction&amp;page={{ path | urlencode }}" rel="nofollow">Report a mistake</a></p>
+  <p>Condition of release, from the PDC: this data constitutes a list of individuals and may not be used for commercial purposes (<a href="https://app.leg.wa.gov/rcw/default.aspx?cite=42.56.070" rel="noopener">RCW 42.56.070(8)</a>). <a href="/about#money">How this data works</a> · <a href="/contact?topic=correction&amp;page={{ path | urlencode }}" rel="nofollow">Report a mistake</a></p>
 </div>
 {%- endmacro %}
 

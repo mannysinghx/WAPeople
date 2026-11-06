@@ -158,6 +158,271 @@ def test_ordinary_descriptions_are_untouched(value):
     assert C.free_text(value) == value
 
 
+@pytest.mark.parametrize("raw,gone,kept", [
+    ("CELL PHONE 425 736 9043", "736", "CELL PHONE"),
+    ("MOBLIE 509-322-0507", "322", "MOBLIE"),
+    ("MOBLE 5093220507", "5093220507", "MOBLE"),
+    ("4258778127 Madelynn Sakay", "4258778127", "Madelynn Sakay"),
+    ("ARROW LUMBER, ORTING 360.893.2200", "893", "ARROW LUMBER, ORTING"),
+    ("Call (206) 555-0142 today", "555", "Call"),
+    ("Todd Toddbowers66@gmail.com", "gmail", "Todd"),
+    ("SARAH@BEEMER-MUMMA.COM", "BEEMER", ""),
+])
+def test_phone_numbers_and_emails_are_removed_from_free_text(raw, gone, kept):
+    s = C.free_text(raw)
+    assert gone not in s and kept in s
+
+
+@pytest.mark.parametrize("value", [
+    "Texting 7-23: 9,205 MMS @0.0450",          # an at sign alone isn't an email address
+    "1 sign @38.99",
+    "INV 8005551234",                           # ten bare digits without a local area code stay
+    "ACCT 1234567890",
+    "Printing 21,622 pieces",
+])
+def test_numbers_that_are_not_phones_or_emails_stay(value):
+    assert C.free_text(value) == value
+
+
+def test_zip_plus_four_is_cut_to_five_digits_in_free_text():
+    s = C.free_text("Childcare - Bonni Lafferty, Tacoma WA 98465-2129")
+    assert s.endswith("Tacoma WA 98465") and "2129" not in s
+
+
+@pytest.mark.parametrize("raw,gone", [
+    ("SUSAN PICATTI DESIGN, 711 20TH E., SEATTLE, WA 98122", "711"),
+    ("Hype Strategies(1500 NW 119th Vancouver, WA 98685) Mailer printing", "1500"),
+    ("Event Food - QFC 1401 Broadway Seattle, WA 98122", "1401"),
+    ("Sale of property 922 5th capital gains", "922"),
+    ("Alex Roderick, [address removed] West University Pl, University Place WA 98467", "West University"),
+    ("CEGNAR COMPANYP.O. BOX 1393", "1393"),
+    ("RENEWAL OF POST OFFICE BOX #470", "470"),
+    ("TRICE TALENT, PO BX 2563 PRINCE FREDERICK, MD 20678", "2563"),
+    ("Ward Media LLC, PMB 232, Poulsbo", "232"),
+])
+def test_more_street_forms_are_removed(raw, gone):
+    s = C.free_text(raw)
+    assert gone not in s and C.ADDRESS_REMOVED in s
+
+
+@pytest.mark.parametrize("value", [
+    "500 1st class stamps", "1000 3rd party mailers", "Postcards for 2024 1st quarter", "2,500 postcards to Tacoma",
+    "Mailer printing (21,622)", "Paid 09/18/2025",
+])
+def test_counts_and_ordinary_text_are_not_mistaken_for_addresses(value):
+    assert C.free_text(value) == value
+
+
+def test_a_po_box_without_a_number_only_loses_the_box():
+    assert C.free_text("PO BOX RENTAL") == "[address removed] RENTAL"
+
+
+@pytest.mark.parametrize("value", ["jane@example.com", "425-736-9043"])
+def test_contact_details_in_a_city_or_employer_field_are_dropped(value):
+    assert C.place(value) is None
+    assert C.employer(value) is None
+    assert C.zip_code(value) is None
+
+
+def test_employer_loses_a_glued_po_box_but_real_employers_stay():
+    assert C.employer("CEGNAR COMPANYP.O. BOX 1393") is None
+    assert C.employer("Microsoft") == "Microsoft"
+    assert C.employer("JEAN LEONARD LOBBYIST/ATTORNEY@LAW") == "JEAN LEONARD LOBBYIST/ATTORNEY@LAW"
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("KUPER GLENN 1542", "KUPER GLENN"),
+    ("OLSON JULIE 16708", "OLSON JULIE"),
+    ("LYON, DOROTHY NE 18TH", "LYON, DOROTHY"),
+    ("EDWARD, D NE 18TH", "EDWARD, D"),
+    ("KNIGHT CATHERINE6", "KNIGHT CATHERINE"),
+    ("DUTELLE AUTUMN 27.0", "DUTELLE AUTUMN"),
+    ("Todd Toddbowers66@gmail.com", "Todd"),
+    ("Jane Doe 123 Main St", "Jane Doe"),
+    ("jerry@sauerdevgroup.com", None),
+    (None, None),
+    # A generation isn't a street, and a person with no number loses nothing.
+    ("WOLF RUSSELL R 3RD", "WOLF RUSSELL R 3RD"),
+    ("Mary Smith", "Mary Smith"),
+    # Filers code unions and shops as people too. Their numbers are part of the name.
+    ("IBEW LOCAL 76", "IBEW LOCAL 76"),
+    ("PSE SEIU 1948", "PSE SEIU 1948"),
+    ("INT'L UNION OF OP ENGINEERS 302", "INT'L UNION OF OP ENGINEERS 302"),
+    ("BOATHOUSE 19", "BOATHOUSE 19"),
+])
+def test_person_name(raw, expected):
+    assert C.person_name(raw) == expected
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("Alliance for Automotive Innovation 1050 K St. NW, Suite 650", "Alliance for Automotive Innovation"),
+    ("FairVote Washington PACPO Box 9100", "FairVote Washington PAC"),
+    ("Acme Co 206-555-0142", "Acme Co"),
+    ("515 Park Place LLC", "515 Park Place LLC"),         # the number is the name
+    ("615 SOUTH 9TH ST LLC", "615 SOUTH 9TH ST LLC"),
+    ("UA LOCAL 290 ST. OF WA SEGREGATED FUND", "UA LOCAL 290 ST. OF WA SEGREGATED FUND"),
+    ("IBEW LOCAL 77 PAC", "IBEW LOCAL 77 PAC"),
+])
+def test_org_name_cuts_only_a_trailing_address(raw, expected):
+    assert C.org_name(raw) == expected
+
+
+def test_org_key_has_no_address_in_it():
+    assert "PO BOX" not in C.org_key("FairVote Washington PACPO Box 9100")
+    assert C.org_key("Alliance for Automotive Innovation 1050 K St. NW, Suite 650") == "ALLIANCE FOR AUTOMOTIVE INNOVATION"
+    assert C.org_key("515 Park Place LLC") == "515 PARK PLACE"
+
+
+@pytest.mark.parametrize("name", [
+    "CANDACE G. INAGI", "CANDACE G INAGI", "INAGI, CANDACE", "INAGI CANDACE", "NICOLAS HANAUER", "JOAN L. MCBRIDE",
+    "MARK ANDERSON", "BETH DOGLIO", "GARRETT HOLBROOK", "STEPHEN L PIPER", "KIM M. KRON", "DEBORAH HARPER",
+    "BOEING WILLIAM E JR", "HOWARD KENNEY, M.D.", "LESTA L. ROGERS", "John Ford", "Mary Washington", "CHURCH JAMES R",
+    "Mark and Sue Smith", "SMITH MARK & SUE",
+])
+def test_names_that_read_as_people(name):
+    assert C.person_shaped(name)
+
+
+@pytest.mark.parametrize("name", [
+    "Microsoft", "Puget Sound Energy", "The Boeing Company", "HOUSE DEMOCRATIC CAMPAIGN COMMITTEE", "WINPOWER STRATEGIES",
+    "ACME AND SONS", "515 Park Place LLC", "SURPLUS FUNDS BACK LLC", "BRIAN BLAKE SURPLUS ACCOUNT", "PHIL WATKINS PUBLIC AFFAIRS",
+    "Bickford Ford Lincoln", "ELI LILLY", "Philip Morris", "FRED MEYER", "MORGAN STANLEY", "HAVE A HEART", "PARK N JET",
+    "JOHNSON AND JOHNSON", "T W O", "WEYERHAEUSER", "BIOPAC", "PITNEY BOWES", "Michael Lacorte Dentistry", "", None,
+])
+def test_names_that_do_not_read_as_people(name):
+    assert not C.person_shaped(name)
+
+
+HOBBS = frozenset({"HOBBS"})
+
+
+@pytest.mark.parametrize("name,own", [
+    ("COMMITTEE TO ELECT STEVE HOBBS SURPLUS ACCOUNT", HOBBS),
+    ("DEREK STANFORD SURPLUS FUND ACCOUNT", frozenset({"STANFORD"})),
+    ("TRANSFER FROM SURPLUS FUNDS WITH WRITTEN PERMISSION", frozenset({"LOW"})),
+    ("SURPLUS FUND", frozenset()),
+    ("HOBBS FOR LT GOVERNOR", HOBBS),
+    ("FRIENDS OF KAREN KEISER", frozenset({"KEISER"})),
+    ("Hargrove for House", frozenset({"HARGROVE"})),
+    ("VOTERS FOR KASTAMA 2008", frozenset({"KASTAMA"})),
+    ("THE COMMITTEE TO RE-ELECT KATHY HAIGH", frozenset({"HAIGH"})),
+    ("08 CITIZENS FOR CHRISTOPHER HURST CAMPAIGN", frozenset({"HURST"})),
+])
+def test_own_accounts(name, own):
+    assert C.own_account(name, own)
+
+
+@pytest.mark.parametrize("name,own", [
+    # Real rows: this one reached Rep. Ortiz-Self, and it's a tribal gaming group.
+    ("CAMPAIGN FOR TRIBAL SELF-RELIANCE BY WASHINGTON INDIAN GAMING ASSOCIATION", frozenset({"ORTIZ", "SELF"})),
+    ("KING COUNTY DEMOCRATS COMMITTEE", frozenset({"KING"})),
+    ("YOUNG REPUBLICANS COMMITTEE", frozenset({"YOUNG"})),
+    ("Friends of Jane Roe", frozenset({"DOE"})),
+    ("Jane Doe", frozenset({"DOE"})),                   # her own name, but no campaign
+    ("The Doe Bakery", frozenset({"DOE"})),
+    ("Bank of Doe", frozenset({"DOE"})),
+    ("Committee to Elect Steve Hobbs", frozenset()),    # no name to compare it to
+    ("SURPLUS LINE ASSOCIATION OF WASHINGTON", frozenset()),
+    ("SURPLUS FUNDS BACK LLC", frozenset()),
+])
+def test_not_own_accounts(name, own):
+    assert not C.own_account(name, own)
+
+
+RULE = frozenset({"RULE"})
+
+
+@pytest.mark.parametrize("code,category,name,own,expected", [
+    ("Self", "Individual", "Alicia Rule", RULE, C.SELF_FUNDED),
+    ("Self", "Individual", "RULE ALICIA J", RULE, C.SELF_FUNDED),
+    ("Self", "Individual", "CAND PERSONAL FUNDS", RULE, C.SELF_FUNDED),
+    ("Self", "Individual", "VANWERVEN LUANNE", frozenset({"VAN", "WERVEN"}), C.SELF_FUNDED),
+    # The filer's code says 'Self'. The name says otherwise.
+    ("Self", "Individual", "House Democratic Campaign Committee", RULE, "Other organizations"),
+    ("Self", "Individual", "HDCC", RULE, "Other organizations"),
+    ("Self", "Individual", "Chevron PAC", RULE, "Other organizations"),
+    ("Self", "Individual", "Steve Ballmer", RULE, "Other sources"),
+    ("Self", "Organization", "WEYERHAEUSER", RULE, "Other organizations"),
+    ("Self", "Individual", "Rule Trucking LLC", RULE, "Other organizations"),
+    # With no name to compare, the code stands.
+    ("Self", "Individual", "House Democratic Campaign Committee", frozenset(), C.SELF_FUNDED),
+    # Their own accounts, however they're coded.
+    ("Self", "Individual", "Lauren Davis Surplus Funds Acct", frozenset({"DAVIS"}), C.OWN_ACCOUNTS),
+    ("Political Action Committee", "Organization", "FRIENDS OF KAREN KEISER", frozenset({"KEISER"}), C.OWN_ACCOUNTS),
+    ("Other", "Organization", "SURPLUS FUND", frozenset(), C.OWN_ACCOUNTS),
+    # Everything else as before.
+    ("Business", "Organization", "Rule Hardware", RULE, "Businesses"),
+    ("Other", "Organization", "MISCELLANEOUS RECEIPTS", RULE, C.MISCELLANEOUS),
+])
+def test_source_type_with_the_officials_name(code, category, name, own, expected):
+    assert C.source_type(code, category, name, own) == expected
+
+
+@pytest.mark.parametrize("args,expected", [
+    (("Self", "Individual", "House Democratic Campaign Committee", RULE), True),
+    (("Self", "Individual", "HDCC", RULE), True),
+    (("Self", "Organization", "WEYERHAEUSER", RULE), True),
+    (("Self", "Individual", "Alicia Rule", RULE), False),
+    (("Self", "Organization", "Alicia Rule", RULE), False),
+    (("Self", "Individual", "Steve Ballmer", RULE), False),
+    (("Political Action Committee", "Organization", "FRIENDS OF KAREN KEISER", frozenset({"KEISER"})), False),
+    (("Other", "Organization", "DEREK STANFORD SURPLUS FUND ACCOUNT", frozenset()), False),
+    (("Business", "Organization", "CANDACE G. INAGI", frozenset(), "ORGANIZER"), False),
+    (("Business", "Organization", "GARRETT HOLBROOK", frozenset(), "CONSULTANT"), False),
+    # An occupation on an organization's row is the job of whoever delivered the check.
+    (("Business", "Organization", "MICROSOFT", frozenset(), "STATE GOVERNMENT AFFAIRS"), True),
+    (("Business", "Organization", "AT&T SERVICES", frozenset(), "KING COUNTY LOBBYIST"), True),
+    (("Unions", "Organization", "SEIU LOCAL 6 PAC", frozenset(), "PRESIDENT"), True),
+    (("Business", "Organization", "CANDACE G. INAGI"), True),   # no occupation: the code stands, and rollups catch it
+    (("Business", "Organization", "Acme"), True),
+])
+def test_is_org_with_name_and_occupation(args, expected):
+    assert C.is_org(*args) is expected
+
+
+@pytest.mark.parametrize("description,recipient,expected", [
+    ("SURPLUS CONTRIBUTION TO HOUSE CAUCUS", "HOUSE DEMOCRATIC CAMPAIGN COMMITTEE", C.PARTY_TRANSFER),
+    ("TRANSFER OF PRIMARY SURPLUS", "WASHINGTON SENATE DEMOCRATIC CAMPAIGN COMMITTEE", C.PARTY_TRANSFER),
+    ("SURPLUS FUNDS", "HDCC", C.PARTY_TRANSFER),
+    ("SURPLUS FUNDS TRANSFER", "KING COUNTY REPUBLICAN PARTY", C.PARTY_TRANSFER),
+    ("TRANSFER TO SURPLUS", "ROBERT FERGUSON SURPLUS FUNDS", C.SURPLUS_TRANSFER),
+    ("SURPLUS", "CENTRAL VALLEY BANK", C.SURPLUS_TRANSFER),
+    ("SURPLUS", None, C.SURPLUS_TRANSFER),
+])
+def test_money_sent_to_a_party_is_not_a_surplus_transfer(description, recipient, expected):
+    assert C.spend_category(None, description, recipient) == expected
+
+
+def test_filers_own_surplus_code_stands_whoever_received_it():
+    assert C.spend_category("Transfer to surplus funds account", "x", "HDCC") == C.SURPLUS_TRANSFER
+
+
+@pytest.mark.parametrize("description,expected", [
+    ("PHONE BANK SUPPORT", C.UNCATEGORIZED),
+    ("PHONE BANKS", C.UNCATEGORIZED),
+    ("NORTH COUNTY FOOD BANK SPONSORSHIP", "Charity"),
+    ("MAIL PROCESSING FEES", C.UNCATEGORIZED),
+    ("PAYCHECK PROCESSING FEE", C.UNCATEGORIZED),
+    ("CHARITABLE CONTRIBUTION", "Charity"),
+    ("OFFICE CABLE/INTERNET/PHONE", "Utilities, phone, and other overhead costs"),
+    ("PRINTER CABLE", C.UNCATEGORIZED),
+    ("CABLE TIES FOR SIGNS", "Printing campaign signs"),
+    ("INTERNET BUY", "Digital advertising"),
+    # The rules still do their jobs.
+    ("BANK FEE", "Bank and payment processing charges"),
+    ("CC PROCESSING FEE", "Bank and payment processing charges"),
+    ("PROCESSING FEES", "Bank and payment processing charges"),
+    ("ONLINE CONTRIBUTION PROCESSING FEE", "Bank and payment processing charges"),
+    ("CABLE", "Broadcast/cable TV advertising"),
+    ("SUBVENDOR: AL MEDIA-SEATTLE CABLE 10/13 - 10/19", "Broadcast/cable TV advertising"),
+    ("CONTRIBUTION TO CAMPAIGN", "Monetary contributions to PAC or candidate"),
+    ("OFFICE INTERNET", "Utilities, phone, and other overhead costs"),
+    ("CELL PHONE", "Utilities, phone, and other overhead costs"),
+])
+def test_spending_rules_on_real_descriptions(description, expected):
+    assert C.spend_category(None, description) == expected
+
+
 # ---- Linking people ----------------------------------------------------------------------
 
 BILLIG = {"id": 1, "first_name": "Andy", "last_name": "Billig"}
@@ -306,6 +571,148 @@ def test_from_json_handles_older_filings():
     assert from_json("") is None
     assert from_json("{not json") is None
     assert from_json(json.dumps(STATEMENT))["income"]
+
+
+def statement(person=None, **fields) -> dict:
+    return {"statement": {"judge_or_law_enforcement": False, **fields}, "person": person or {"name": "Jane Roe"}}
+
+
+def test_family_names_are_redacted_from_every_kept_string():
+    d = sanitize(statement(
+        spouse="Pat Secretname",
+        dependents=["Kid Roe"],
+        income={"data": [{"who": ["filer"], "name": "Pat Secretname Consulting", "why": "Fees to PAT"}]},
+        accounts={"data": [{"who": ["spouse"], "name": "IRA - Secretname", "assets": [{"nature": "IRA (Pat)"}]}]},
+        business_associations={"data": [{"who": ["spouse"], "legal_name": "SECRETNAME LLC", "description": "Kid helps"}]},
+        creditors=[{"who": ["filer"], "name": "Pat Secretname", "payment_terms": "None"}],
+        gifts=[{"who": ["filer"], "donor_name": "Kid Roe"}],
+    ))
+    text = json.dumps(d)
+    assert "secretname" not in text.lower() and "Pat" not in text and "PAT" not in text and "Kid" not in text
+    assert d["income"][0]["source"] == "[family member] Consulting"
+    assert d["creditors"][0]["name"] == "[family member]"
+    assert d["gifts"][0]["donor"] == "[family member]"
+
+
+def test_the_officials_own_surname_and_other_words_stay():
+    d = sanitize(statement(
+        person={"name": "Janice Zahn"}, spouse="Bob Zahn", dependents=["Leah Zahn"],
+        income={"data": [{"who": ["filer"], "name": "Zahn Consulting"}, {"who": ["filer"], "name": "Leah Zahn Tutoring"},
+                         {"who": ["filer"], "name": "Bobcat Rentals"}, {"who": ["filer"], "name": "Boeing"}]},
+    ))
+    assert [i["source"] for i in d["income"]] == ["Zahn Consulting", "[family member] Tutoring", "Bobcat Rentals", "Boeing"]
+
+
+def test_a_nickname_covers_the_formal_name():
+    d = sanitize(statement(person={"name": "Sharon Wylie"}, spouse="Ted Gathe",
+                           income={"data": [{"who": ["filer"], "name": "SSI for Theodore Gathe, husband"}]}))
+    assert d["income"][0]["source"] == "SSI for [family member] [family member], husband"
+
+
+def test_a_filled_in_placeholder_is_not_a_name():
+    for spouse in ("None", "N/A", "Not applicable", "", None):
+        d = sanitize(statement(spouse=spouse, dependents=[], income={"data": [{"who": ["filer"], "name": "None of these"}]}))
+        assert d["income"][0]["source"] == "None of these"
+
+
+def test_a_brokerage_is_not_a_family_member_because_of_a_shared_name():
+    d = sanitize(statement(
+        spouse="James Doe", dependents=["Jones Doe"],
+        accounts={"data": [{"who": ["filer"], "name": "Raymond James", "assets": [{"nature": "IRA"}]},
+                           {"who": ["filer"], "name": "Edward Jones", "assets": [{"nature": "IRA"}]}]},
+    ))
+    assert [a["name"] for a in d["accounts"]] == ["Raymond James", "Edward Jones"]
+
+
+def test_home_address_pair_is_removed_from_any_kept_string():
+    raw = statement(
+        person={"name": "Javier Valdez", "address": "1234 NE 56th St"},
+        real_estate=[{"who": ["filer"], "location": {"address": "9800 Roosevelt Way NE, # 23", "city": "Seattle"}}],
+        creditors=[{"who": ["filer"], "name": "9800 Roosevelt Condominiums", "payment_terms": "15 years - Special Assessment"},
+                   {"who": ["filer"], "name": "1234 NE 56TH HOA"}, {"who": ["filer"], "name": "1234 56th Group"},
+                   {"who": ["filer"], "name": "9800 Lake City Partners"}, {"who": ["filer"], "name": "Roosevelt Savings"}],
+    )
+    d = sanitize(raw)
+    assert "Roosevelt Condominiums" not in json.dumps(d)
+    assert [c["name"] for c in d["creditors"]] == [
+        "[address removed]", "[address removed] HOA", "[address removed] Group", "9800 Lake City Partners", "Roosevelt Savings"]
+    assert d["creditors"][0]["terms"] == "15 years - Special Assessment"
+
+
+def test_a_statement_without_any_address_is_fine():
+    assert sanitize(statement(real_estate=[{"who": ["filer"], "location": "not a dict"}]))["real_estate"]
+
+
+@pytest.mark.parametrize("nature", [
+    "Regular Savings - Son", "Personal Savings - Daughter", "529 Plan - Son", "Checking Account (Son)",
+    "529 College Savings Plan (For Benefit of Daughter)", "Vanguard UTMA (Held in Trust for Son Samuel Frockt)",
+    "UTMA / Preston Hoff (grandson) / Mutual Funds", "UGMA account", "529 ACCOUNT FBO M. HECK", "Savings for my granddaughter",
+    "529 Plan - James Schwarmann", "Aspen - 529", "Guaranteed Education Tuition - Washington state - for Leah Zahn",
+    "Guaranteed Education Tuition Account for Henry Pollet",
+])
+def test_holdings_marked_as_a_childs_are_dropped(nature):
+    raw = statement(accounts={"data": [{"who": ["filer"], "name": "USAA",
+                                        "assets": [{"nature": nature, "value": "30000-59999"}, {"nature": "IRA", "value": "1"}]}]})
+    assert sanitize(raw)["accounts"][0]["assets"] == [{"nature": "IRA", "value": "1", "income": None}]
+
+
+@pytest.mark.parametrize("nature", [
+    "529 Plan", "529 Plan - Cash", "529 Plan - Stocks and bonds", "College Savings Plan", "Fidelity 529", "College savings/529",
+    "Seattle Children's Hospital Pension and Retirement Plan", "Johnson & Sons Stock", "Wilson and Sons",
+    "( Joint Filer/Spouse and Joint Accounts of Filer w/Son and w/Daugter; Vanguard 529 Account for Son & Daughter)",
+])
+def test_holdings_that_only_look_like_a_childs_stay(nature):
+    raw = statement(accounts={"data": [{"who": ["filer"], "name": "USAA", "assets": [{"nature": nature}]}]})
+    assert sanitize(raw)["accounts"][0]["assets"][0]["nature"] == nature
+
+
+def test_account_is_dropped_when_it_or_everything_in_it_is_a_childs():
+    raw = statement(accounts={"data": [
+        {"who": ["filer"], "name": "529 ACCOUNT FBO R. HECK", "assets": [{"nature": "Mutual Funds"}]},
+        {"who": ["filer"], "name": "USAA", "assets": [{"nature": "Savings - Son"}]},
+        {"who": ["filer"], "name": "BECU", "assets": []},
+    ]})
+    assert [a["name"] for a in sanitize(raw)["accounts"]] == ["BECU"]
+
+
+def test_holding_with_a_dependents_name_is_dropped_even_with_no_relation_word():
+    raw = statement(dependents=["Gaelia Schwarmann"], accounts={"data": [
+        {"who": ["filer"], "name": "USAA", "assets": [{"nature": "Savings - Gaelia"}, {"nature": "Savings"}]}]})
+    assert [a["nature"] for a in sanitize(raw)["accounts"][0]["assets"]] == ["Savings"]
+
+
+def test_a_former_spouse_named_as_a_source_of_support_is_removed():
+    raw = statement(income={"data": [{"who": ["filer"], "name": "Edward Rule", "why": "Spousal support"},
+                                     {"who": ["filer"], "name": "Tim Farrell", "why": "Child Support"},
+                                     {"who": ["filer"], "name": "DSHS", "why": "Child support"}]})
+    assert [i["source"] for i in sanitize(raw)["income"]] == ["[family member]", "[family member]", "DSHS"]
+
+
+@pytest.mark.parametrize("value", [
+    "My abuser was ordered to reimburse a portion of my attorney's fees",
+    "Securing a domestic violence protection order",
+    "Legal costs for a restraining order",
+    "Paid by my stalker after a judgment",
+    "Settlement after a sexual assault",
+])
+def test_personal_details_are_removed(value):
+    d = sanitize(statement(income={"data": [{"who": ["filer"], "name": "Legal judgment", "why": value, "income": "0-29999"}]}))
+    assert d["income"] == [{"who": ["Official"], "source": "Legal judgment", "for": "[personal detail removed]",
+                            "amount": "0-29999", "category": None, "city": None, "state": None}]
+
+
+@pytest.mark.parametrize("value", [
+    "Domestic Violence Prevention Services", "Domestic Violence support", "Rebuilding Hope the Sexual Assault Center for Pierce County",
+    "Nonprofit organization restraining government overreach", "Substance Abuse Treatment Center", "Abuse Prevention Manager",
+])
+def test_groups_doing_this_work_keep_their_names(value):
+    d = sanitize(statement(business_associations={"data": [{"who": ["filer"], "legal_name": "X", "description": value}]}))
+    assert d["businesses"][0]["what"] == value
+
+
+def test_sanitize_tolerates_junk():
+    assert sanitize({})["income"] == []
+    assert sanitize({"person": "not a dict", "statement": {"spouse": 7, "dependents": {"x": 1}}})["income"] == []
 
 
 # ---- Display helpers ---------------------------------------------------------------------

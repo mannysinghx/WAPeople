@@ -5,11 +5,13 @@ import json
 import re
 import time
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from html import escape
 from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -25,16 +27,17 @@ from ..legislature.parse import (
 )
 from ..legislature.stages import STAGES, next_session_start
 from ..legislature.sync import current_biennium
-from ..money.clean import key_to_slug
+from ..money.clean import key_to_slug, person_shaped
 from . import money_queries as MQ
 from . import queries as Q
-from .middleware import CanonicalHostMiddleware, HeadMiddleware
+from .middleware import CanonicalHostMiddleware, HeadMiddleware, NulByteMiddleware
 from .money_routes import build_router as build_money_router
 from .security import SecurityMiddleware
 
 HERE = Path(__file__).parent
 app = FastAPI(title="WA People", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.add_middleware(NulByteMiddleware)
 app.add_middleware(SecurityMiddleware)
 app.add_middleware(HeadMiddleware)
 app.add_middleware(CanonicalHostMiddleware, site_url=CFG.SITE_URL)
@@ -52,29 +55,29 @@ def fmt_date(d, long: bool = False) -> str:
     return d.strftime("%B %-d, %Y" if long else "%b %-d, %Y")
 
 
+def _dollars(v: float, places: int) -> str:
+    """A value that rounds to zero has no sign: -0.4 reads "$0", not "-$0"."""
+    digits = f"{abs(v):,.{places}f}"
+    return f"-${digits}" if v < 0 and digits.strip("0.,") else f"${digits}"
+
+
 def usd(v) -> str:
-    if v is None:
-        return "—"
-    v = float(v)
-    return f"-${-v:,.0f}" if v < 0 else f"${v:,.0f}"
+    return "—" if v is None else _dollars(float(v), 0)
 
 
 def usd_cents(v) -> str:
-    if v is None:
-        return "—"
-    v = float(v)
-    return f"-${-v:,.2f}" if v < 0 else f"${v:,.2f}"
+    return "—" if v is None else _dollars(float(v), 2)
 
 
 def usd_short(v) -> str:
-    """$1.2M / $45.3K / $812, for headline numbers. Exact figures stay in the tables."""
+    """$1.2M / $45K / $812, for headline numbers. Exact figures stay in the tables."""
     v = float(v or 0)
-    sign, a = ("-", -v) if v < 0 else ("", v)
-    if a >= 1_000_000:
+    sign, a = ("-" if v < 0 else ""), abs(v)
+    if round(a / 1_000) >= 1_000:       # or 999,500 would read "$1000K"
         return f"{sign}${a / 1_000_000:.1f}M"
     if a >= 10_000:
         return f"{sign}${a / 1_000:.0f}K"
-    return f"{sign}${a:,.0f}"
+    return _dollars(v, 0)
 
 
 _SMALL_WORDS = {"of", "the", "and", "for"}
@@ -90,18 +93,35 @@ def position_label(s: str | None) -> str:
     return f"Position {m[1]}" if m else str(s or "")
 
 
+_AMOUNT = r"\$?([0-9]+(?:\.[0-9]+)?)"
+
+
 def range_label(s: str | None) -> str:
-    """Financial statement ranges: '30000-59999' -> '$30,000–$59,999'."""
+    """Financial statement ranges: '30000-59999' -> '$30,000–$59,999'. The top bracket is written
+    '500000+' or '1000000-', and a few amounts have cents: '129042.00' -> '$129,042.00'."""
     s = (s or "").strip()
     if not s:
         return "—"
-    m = re.fullmatch(r"\$?(\d+)\s*-\s*\$?(\d+)", s)
+    m = re.fullmatch(rf"{_AMOUNT}\s*-\s*{_AMOUNT}", s)
     if m:
-        return f"${int(m[1]):,}–${int(m[2]):,}"
-    m = re.fullmatch(r"\$?(\d+)\s*\+", s)
+        return f"${Decimal(m[1]):,}–${Decimal(m[2]):,}"
+    m = re.fullmatch(rf"{_AMOUNT}\s*[-+]", s)
     if m:
-        return f"${int(m[1]):,} or more"
-    return f"${int(s):,}" if s.isdigit() else s
+        return f"${Decimal(m[1]):,} or more"
+    m = re.fullmatch(_AMOUNT, s)
+    return f"${Decimal(m[1]):,}" if m else s
+
+
+def money_text(value):
+    """An amount typed into a statement: '-69.93' -> '-$69.93'. Anything else stays as filed."""
+    s = str(value).strip()
+    return usd_cents(s.replace("$", "").replace(",", "")) if re.fullmatch(r"-?\$?[0-9,]*\.?[0-9]+", s) else value
+
+
+def percent_text(value):
+    """'100' or '100%' -> '100%'. Anything else stays as filed."""
+    s = str(value).strip().removesuffix("%").strip()
+    return f"{s}%" if re.fullmatch(r"-?[0-9]*\.?[0-9]+", s) else value
 
 
 def fec_committee_link(row: dict) -> str:
@@ -174,6 +194,8 @@ templates.env.filters["usd_blank"] = lambda v: "—" if v in (None, 0) else usd(
 templates.env.filters["office_label"] = office_label
 templates.env.filters["position_label"] = position_label
 templates.env.filters["range_label"] = range_label
+templates.env.filters["money_text"] = money_text
+templates.env.filters["percent_text"] = percent_text
 templates.env.filters["org_slug"] = key_to_slug
 templates.env.filters["election_label"] = election_label
 templates.env.filters["biennium"] = biennium_label
@@ -188,12 +210,15 @@ templates.env.globals.update(
 )
 
 
-def render(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLResponse:
+def render(request: Request, name: str, status_code: int = 200, canonical_path: str | None = None,
+           **ctx) -> HTMLResponse:
+    """Takes a pooled connection of its own, so never call it inside a `with conn()` block.
+    canonical_path is the record's normal address, when the URL typed can vary (/money/00299)."""
     with conn() as c:
         ctx.setdefault("updated", Q.last_updates(c))
     ctx["current_biennium"] = current_biennium()
     ctx["path"] = request.url.path
-    ctx["canonical"] = site_base(request) + request.url.path
+    ctx["canonical"] = site_base(request) + (canonical_path or request.url.path)
     return templates.TemplateResponse(request, name, ctx, status_code=status_code)
 
 
@@ -203,6 +228,11 @@ def site_base(request: Request) -> str:
 
 def page_param(page: int) -> int:
     return max(1, min(page, 10_000))
+
+
+def year_param(value: str) -> int | None:
+    """Four ASCII digits: make_date() rejects anything longer, and str.isdigit also accepts '²'."""
+    return int(value) if value.isascii() and value.isdigit() and len(value) == 4 else None
 
 
 # ---- Pages ------------------------------------------------------------------------
@@ -300,7 +330,7 @@ def progress_steps(bill: dict, actions: list[dict], rolls: list[dict]) -> list[d
 
 @app.get("/bills/{biennium}/{slug}", response_class=HTMLResponse)
 def bill_detail(request: Request, biennium: str, slug: str):
-    m = re.fullmatch(r"([A-Za-z]+)-(\d+)", slug)
+    m = re.fullmatch(r"([A-Za-z]+)-([0-9]{1,9})", slug)     # int() refuses thousands of digits
     if not m or not re.fullmatch(r"\d{4}-\d{2}", biennium):
         raise HTTPException(404)
     with conn() as c:
@@ -317,7 +347,7 @@ def bill_detail(request: Request, biennium: str, slug: str):
     return render(
         request, "bill.html", bill=bill, sponsors=sponsors, actions=actions,
         final_rolls=final_rolls, other_rolls=other_rolls, cases=cases, others=others,
-        steps=progress_steps(bill, actions, rolls),
+        steps=progress_steps(bill, actions, rolls), canonical_path=bill_url(bill["biennium"], bill["bill_id"]),
     )
 
 
@@ -331,12 +361,9 @@ def legislators(request: Request, biennium: str = "", chamber: str = "", party: 
             biennium = current_biennium()
         members = Q.list_members(c, biennium=biennium, chamber=chamber, party=party,
                                  district=district.strip(), q=q.strip()[:100])
-        # More names than seats means some people left mid-term and were replaced. Say so, using
-        # the same "who voted last in this seat" rule as the district map.
-        seats = delegations(c, biennium)
-        holders = {m["id"] for d in seats.values() for m in d["senators"] + d["representatives"]}
+        left = Q.left_during_term(c, biennium)
         for m in members:
-            m["left_early"] = bool(holders) and m["id"] not in holders
+            m["left_early"] = m["id"] in left
     return render(request, "legislators.html", members=members, bienniums=bienniums,
                   f=dict(biennium=biennium, chamber=chamber, party=party, district=district, q=q))
 
@@ -359,7 +386,8 @@ def legislator(request: Request, member_id: int, tab: str = "votes", biennium: s
         bienniums = [t["biennium"] for t in member["terms"]]
         money = MQ.legislator_money(c, member_id)
     return render(request, "legislator.html", m=member, stats=stats, tab=tab, listing=listing,
-                  bienniums=bienniums, money=money, f=dict(biennium=biennium, vote=vote, final=final, q=q))
+                  bienniums=bienniums, money=money, f=dict(biennium=biennium, vote=vote, final=final, q=q),
+                  canonical_path=f"/legislators/{member_id}")
 
 
 @app.get("/votes", response_class=HTMLResponse)
@@ -379,7 +407,7 @@ def vote_detail(request: Request, rid: int):
         rc = Q.get_roll_call(c, rid)
     if not rc:
         raise HTTPException(404)
-    return render(request, "vote.html", rc=rc)
+    return render(request, "vote.html", rc=rc, canonical_path=f"/votes/{rid}")
 
 
 @app.get("/court", response_class=HTMLResponse)
@@ -387,8 +415,7 @@ def court(request: Request, q: str = "", category: str = "", year_from: str = ""
           linked: str = "", sort: str = "", page: int = 1):
     q = q.strip()[:200]
     sort = sort or ("relevance" if q else "newest")
-    yf = int(year_from) if year_from.isdigit() else None
-    yt = int(year_to) if year_to.isdigit() else None
+    yf, yt = year_param(year_from), year_param(year_to)
     category = category if category in CATEGORIES else ""
     with conn() as c:
         result = Q.search_cases(c, q=q, category=category, year_from=yf, year_to=yt,
@@ -410,7 +437,8 @@ def case_detail(request: Request, case_id: int):
     for m in unresolved:
         if m.get("year"):
             m["biennium"] = biennium_for_year(m["year"])
-    return render(request, "case.html", cc=cc, unresolved=unresolved, linked_texts=linked_texts)
+    return render(request, "case.html", cc=cc, unresolved=unresolved, linked_texts=linked_texts,
+                  canonical_path=f"/court/{case_id}")
 
 
 @app.get("/search", response_class=HTMLResponse)
@@ -426,9 +454,11 @@ def search(request: Request, q: str = ""):
             b = bills_page.items[0]
             return RedirectResponse(bill_url(b["biennium"], b["bill_id"]), status_code=302)
         members = [] if ref else Q.search_members(c, q)
+        officials = [] if ref else MQ.search_officials(c, q)
         orgs = [] if ref else MQ.search_orgs(c, q)
         cases = Q.search_cases(c, q=q, sort="relevance", page_size=6)
-    return render(request, "search.html", q=q, bills=bills_page, members=members, cases=cases, orgs=orgs)
+    return render(request, "search.html", q=q, bills=bills_page, members=members, officials=officials, cases=cases,
+                  orgs=orgs)
 
 
 @app.get("/about", response_class=HTMLResponse)
@@ -576,8 +606,9 @@ def sitemap_part(request: Request, name: str):
             paths = [f"/legislators/{r['id']}" for r in c.execute("SELECT id FROM members ORDER BY id")]
             paths += [f"/money/{r['id']}" for r in c.execute(
                 "SELECT id FROM money_people WHERE n_campaigns > 0 OR fed_cycles > 0 ORDER BY id")]
+            # A name that reads like a person's stays out, however a filer coded it.
             paths += [f"/money/organizations/{key_to_slug(r['key'])}"
-                      for r in c.execute("SELECT key FROM money_orgs ORDER BY total DESC LIMIT 20000")]
+                      for r in MQ.sitemap_orgs(c) if not person_shaped(r["name"])]
         elif name == "court":
             paths = [f"/court/{r['id']}" for r in c.execute("SELECT id FROM court_cases ORDER BY id")]
         elif name.startswith("bills-") and re.fullmatch(r"\d{4}-\d{2}", name[6:]):
@@ -619,6 +650,7 @@ app.include_router(build_money_router(render))
 
 
 @app.exception_handler(404)
+@app.exception_handler(RequestValidationError)
 async def not_found(request: Request, exc):
     return templates.TemplateResponse(
         request, "404.html", {"current_biennium": current_biennium(), "path": request.url.path,

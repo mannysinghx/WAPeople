@@ -1,16 +1,18 @@
 {% extends "base.html" %}
 {% from "_macros.html" import party %}
 {% from "_money.html" import source_note with context %}
-{% block title %}{{ org.name }}: money given to Washington officials{% endblock %}
-{% block description %}{{ org.name }} gave {{ org.total | usd }} to {{ org.n_people }} Washington State elected official{{ "" if org.n_people == 1 else "s" }}, according to Public Disclosure Commission records.{% endblock %}
+{% block title %}{{ org.name }}: money given to Washington state officials{% endblock %}
+{% block description %}{{ org.name }} gave {{ org.total | usd }} to {{ org.n_people }} Washington state official{{ "" if org.n_people == 1 else "s" }}, according to Public Disclosure Commission records.{% endblock %}
+{% block robots %}{% if noindex %}<meta name="robots" content="noindex">{% endif %}{% endblock %}
 {% block content %}
 <nav class="crumbs" aria-label="Breadcrumb"><a href="/money">Money trails</a> › <a href="/money/organizations">Organizations</a> › {{ org.name }}</nav>
 <section class="card">
   <h1 style="margin:0">{{ org.name }}</h1>
   <div class="muted">{{ org.source_type }}</div>
+  <p class="small muted" style="margin:.4rem 0 0">These figures cover state campaign money reported to the PDC. Gifts to federal campaigns aren't counted.</p>
 </section>
 <section class="stats" style="margin-top:1rem" aria-label="Totals">
-  <div class="stat"><div class="n">{{ org.total | usd_short }}</div><div class="l">Given to officials on this site</div></div>
+  <div class="stat"><div class="n">{{ org.total | usd_short }}</div><div class="l">Given to state officials on this site (PDC)</div></div>
   <div class="stat"><div class="n">{{ org.n_people }}</div><div class="l">Official{{ "" if org.n_people == 1 else "s" }} funded</div></div>
   <div class="stat"><div class="n">{{ "{:,}".format(org.n_gifts) }}</div><div class="l">Contributions</div></div>
   <div class="stat"><div class="n">{{ org.last_date | date }}</div><div class="l">Latest gift</div></div>
@@ -48,7 +50,7 @@
     <tbody>
     {% for r in org.recipients %}
     <tr>
-      <td><a href="/money/{{ r.id }}?view=contributions&amp;donor={{ org.key | urlencode }}" rel="nofollow"><strong>{{ r.name }}</strong></a>{% if r.party in ("D", "R") %} <span class="small">{{ party(r.party) }}</span>{% endif %}</td>
+      <td><a href="/money/{{ r.id }}?{% if r.fec_candidate_ids %}records=state&amp;{% endif %}view=contributions&amp;donor={{ org.key | urlencode }}" rel="nofollow"><strong>{{ r.name }}</strong></a>{% if r.party in ("D", "R") %} <span class="small">{{ party(r.party) }}</span>{% endif %}</td>
       <td data-label="Office">{{ r.title }}</td>
       <td data-label="Total" class="num">{{ r.total | usd }}</td>
       <td data-label="Gifts" class="num">{{ r.n }}</td>
@@ -66,10 +68,11 @@
   <table class="rtable">
     <thead><tr><th scope="col">Date</th><th scope="col">To</th><th scope="col" class="num">Amount</th><th scope="col">Type</th><th scope="col">Report</th></tr></thead>
     <tbody>
+    {% set has_federal = org.recipients | selectattr("fec_candidate_ids") | map(attribute="id") | list %}
     {% for g in org.recent %}
     <tr>
       <td class="nowrap">{{ g.receipt_date | date }}</td>
-      <td data-label="To"><a href="/money/{{ g.person_id }}">{{ g.person_name }}</a> <span class="muted small">({{ g.election_year }})</span></td>
+      <td data-label="To"><a href="/money/{{ g.person_id }}{% if g.person_id in has_federal %}?records=state{% endif %}">{{ g.person_name }}</a> <span class="muted small">({{ g.election_year }})</span></td>
       <td data-label="Amount" class="num">{{ g.amount | usd_cents }}</td>
       <td data-label="Type">{{ g.cash_or_in_kind or "—" }}</td>
       <td data-label="Report">{% if g.url %}<a href="{{ g.url }}" rel="noopener nofollow">PDC ↗</a>{% endif %}</td>

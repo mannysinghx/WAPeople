@@ -7,6 +7,10 @@ finished cycle is never read twice, and an interrupted run continues with what i
 Reading this data correctly takes some care. These rules come from comparing the files with the
 FEC's published totals:
   * A row with memo code X is detail about money already counted elsewhere; it doesn't add to totals.
+    Neither do types ending in J (a share of a joint fundraising gift, which some filers leave
+    unmarked) or a campaign's own report of a committee's gift (18K, 15Z): the giver's row counts.
+  * One filed line can be in a file several times under new SUB_IDs, and amended reports repeat
+    lines, so rows are matched on their transaction ID and only the newest filing's copy is kept.
   * Types 21Y and 22Y are refunds, and the file shows them as positive numbers.
   * A committee's gift to a candidate is found in the giver's report (the pas2 file), so the giver
     is the row's first column, not its name column.
@@ -29,16 +33,19 @@ from psycopg.types.json import Jsonb
 
 from . import clean as C
 from .fec_bulk import FecBulk
-from .sync import SuspiciousSourceData
+from .sync import EMPLOYER_STOP, MIN_EMPLOYER_DONORS, PAYEE_LUMP_SUM, SuspiciousSourceData
 
 log = logging.getLogger(__name__)
 
 FIRST_CYCLE = 1992
+FIRST_LINKAGE_CYCLE = 2000      # the candidate-committee linkage file starts here
 INDIVIDUALS = "Individuals (itemized)"
+SMALL_GIFTS = "Individuals (small gifts, not itemized)"
 REFUND_TYPES = {"20Y", "21Y", "22Y", "23Y"}
 ORG_TYPES = {"C": "Corporate PACs", "L": "Labor union PACs", "M": "Membership group PACs",
              "T": "Trade association PACs", "V": "Cooperative PACs", "W": "Corporation-without-stock PACs"}
 GIFT_TYPES = {"24K", "24Z"}     # direct and in-kind gifts; other 24x types are outside spending
+GIVER_COUNTED_TYPES = {"18K", "15Z"}    # the same gift is the counted row in the giver's pas2 report
 
 
 def current_cycle(today: date | None = None) -> int:
@@ -73,6 +80,8 @@ def committee_source(cmte_type: str, designation: str, org_type: str) -> str:
 
 
 def individual_source(tx_type: str, entity: str, name: str) -> str:
+    if tx_type.startswith("11"):    # the FEC's type for a tribe's gift, often filed with no entity type
+        return "Tribes and other organizations"
     if tx_type == "15C" or entity == "CAN":
         return C.SELF_FUNDED
     if entity in ("ORG", "PAC", "COM", "CCM", "PTY"):
@@ -177,10 +186,12 @@ def contribution_row(r: list[str], person: int, cycle: int, dataset: str = "indi
     amount = C.money(r[14])
     if refund:
         amount = -abs(amount)
-    name = C.free_text(r[7]) or "(name not reported)"
-    source = individual_source(tx, entity, name) if dataset == "indiv" else receipt_source(tx, entity)
+    source = individual_source(tx, entity, r[7]) if dataset == "indiv" else receipt_source(tx, entity)
+    clean_name = C.person_name if source in (INDIVIDUALS, C.SELF_FUNDED) else C.free_text
+    name = clean_name(r[7]) or "(name not reported)"
+    memo = r[18].strip() == "X" or tx.endswith("J") or tx in GIVER_COUNTED_TYPES
     return (int(r[20]), person, r[0], cycle, dataset, tx, r[2].strip() or None, r[3].strip() or None, r[4].strip() or None,
-            source, r[18].strip() == "X", refund, name, C.place(r[8]), C.text(r[9]), _zip5(r[10]), C.employer(r[11]),
+            source, memo, refund, name, C.place(r[8]), C.text(r[9]), _zip5(r[10]), C.employer(r[11]),
             C.free_text(r[12]), fec_date(r[13]), amount, C.text(r[15]), None, C.free_text(r[19]))
 
 
@@ -213,23 +224,66 @@ def outflow_row(r: list[str], person: int, cycle: int) -> tuple | None:
             fec_date(r[13]), C.money(r[14]), C.text(r[15]))
 
 
-def outside_rows(rows, people: dict[str, int], cycle: int) -> list[tuple]:
-    """Amended reports repeat earlier rows, so each transaction keeps only its newest filing."""
+# Where each file keeps a row's transaction ID and filing number.
+FILING_COLUMNS = {"indiv": (16, 17), "oth": (16, 17), "pas2": (17, 18), "oppexp": (23, 22)}
+
+
+def newest_filings(rows, dataset: str) -> list[list[str]]:
+    """Each filed line once, from its newest filing. A transaction ID can come up again in a committee's
+    other reports, so the report and year are part of the match. Rows with no ID can't be matched and all stay."""
+    tran_col, file_col = FILING_COLUMNS[dataset]
     newest: dict[tuple, tuple] = {}
+    unmatched = []
     for r in rows:
-        candidate = (r.get("cand_id") or "").strip()
-        if candidate not in people:
+        if len(r) <= max(tran_col, file_col) or not r[tran_col].strip():
+            unmatched.append(r)
             continue
-        spender, tran = (r.get("spe_id") or "").strip(), (r.get("tran_id") or "").strip()
-        filing = int(r["file_num"]) if (r.get("file_num") or "").strip().isdigit() else 0
-        key = (spender, tran or (r.get("image_num") or "").strip())
-        if key in newest and newest[key][0] >= filing:
+        report, year = (r[3], r[2]) if dataset == "oppexp" else (r[2], r[13].strip()[-4:])
+        key = (r[0], report.strip(), year.strip(), r[tran_col].strip())
+        filing = int(r[file_col]) if r[file_col].strip().isdigit() else 0
+        if key not in newest or filing > newest[key][0]:
+            newest[key] = (filing, r)
+    return unmatched + [r for _, r in newest.values()]
+
+
+def outside_rows(rows, people: dict[str, int], cycle: int) -> list[tuple]:
+    """Many filers restart their transaction IDs with each filing, so an ID only identifies a row together
+    with its filing. An amendment replaces the whole filing it names, or the rows with its IDs when it names
+    none. A line repeated word for word with its ID in a later filing counts once. Rows must all be read first,
+    since an amendment that drops a candidate has no row naming them."""
+    def field(r: dict, column: str) -> str:
+        return (r.get(column) or "").strip()
+
+    def filing(r: dict) -> int:
+        return int(field(r, "file_num")) if field(r, "file_num").isdigit() else 0
+
+    replaced: set[tuple] = set()
+    amended_ids: dict[tuple, int] = {}
+    ours = []
+    for r in rows:
+        if field(r, "amndt_ind") not in ("", "N"):
+            if field(r, "prev_file_num"):
+                replaced.add((field(r, "spe_id"), field(r, "prev_file_num")))
+            elif field(r, "tran_id"):
+                key = (field(r, "spe_id"), field(r, "tran_id"))
+                amended_ids[key] = max(amended_ids.get(key, 0), filing(r))
+        if field(r, "cand_id") in people:
+            ours.append(r)
+
+    newest: dict[tuple, tuple] = {}
+    for r in ours:
+        candidate, spender, tran = field(r, "cand_id"), field(r, "spe_id"), field(r, "tran_id")
+        if (spender, field(r, "file_num")) in replaced or amended_ids.get((spender, tran), 0) > filing(r):
             continue
-        row = (f"{cycle}-{spender}-{key[1]}", people[candidate], candidate, cycle, spender or None,
-               C.text(r.get("spe_nam")), (r.get("sup_opp") or "").strip() or None, C.money(r.get("exp_amo")),
-               fec_date(r.get("exp_date") or r.get("dissem_dt")), C.free_text(r.get("pur")), C.free_text(r.get("pay")),
-               (r.get("image_num") or "").strip() or None)
-        newest[key] = (filing, row)
+        spent_on = field(r, "exp_date") or field(r, "dissem_dt")
+        line = tran or field(r, "image_num")
+        key = (spender, line, candidate, spent_on, field(r, "exp_amo"), field(r, "pur").upper())
+        if key in newest and newest[key][0] >= filing(r):
+            continue
+        newest[key] = (filing(r), (
+            f"{cycle}-{spender}-{field(r, 'file_num')}-{line}", people[candidate], candidate, cycle, spender or None,
+            C.text(r.get("spe_nam")), field(r, "sup_opp") or None, C.money(r.get("exp_amo")), fec_date(spent_on),
+            C.free_text(r.get("pur")), C.free_text(r.get("pay")), field(r, "image_num") or None))
     return [v[1] for v in newest.values()]
 
 
@@ -242,6 +296,10 @@ def totals_row(r: list[str], person: int, cycle: int) -> tuple:
             (r[19].lstrip("0") or None) if len(r) > 19 else None, C.text(r[4]), money(r, 5), money(r, 7), money(r, 17),
             money(r, 25), money(r, 26), money(r, 11), money(r, 12), money(r, 13), money(r, 6), money(r, 8), money(r, 28),
             money(r, 29), money(r, 9), money(r, 10), money(r, 16), fec_date(r[27]) if len(r) > 27 else None)
+
+
+def _roster(people: dict[str, int]) -> list[str]:
+    return sorted(f"{candidate}:{person}" for candidate, person in people.items())
 
 
 class FecSync:
@@ -263,15 +321,19 @@ class FecSync:
         self.conn.commit()
         return {cid: r["id"] for r in rows for cid in r["fec_candidate_ids"]}
 
-    def _due(self, dataset: str, cycle: int, name: str, full: bool, today: date):
+    def _due(self, dataset: str, cycle: int, name: str, full: bool, today: date, people: dict[str, int]):
         """The file's version info if it should be loaded now, otherwise None."""
         info = self.bulk.info(name)
-        if info is None:
-            return None
         state = self.conn.execute(
-            "SELECT etag, loaded_at FROM fec_sync_state WHERE dataset = %s AND cycle = %s", (dataset, cycle)).fetchone()
+            "SELECT etag, rows, roster, loaded_at FROM fec_sync_state WHERE dataset = %s AND cycle = %s",
+            (dataset, cycle)).fetchone()
         self.conn.commit()
-        if full or state is None:
+        if info is None:
+            if state and state["rows"]:
+                raise SuspiciousSourceData(f"{name} had {state['rows']} rows and is no longer published. Nothing changed.")
+            return None
+        # Rows are filtered to the roster as they're read, so a new name has nothing in a file loaded before it.
+        if full or state is None or state["roster"] != _roster(people):
             return info
         if state["etag"] == info.etag:
             self.stats["files_unchanged"] += 1
@@ -281,21 +343,28 @@ class FecSync:
             return None
         return info
 
-    def _record(self, dataset: str, cycle: int, etag: str | None, rows: int) -> None:
+    def _record(self, dataset: str, cycle: int, etag: str | None, rows: int, people: dict[str, int]) -> None:
         self.conn.execute(
-            "INSERT INTO fec_sync_state (dataset, cycle, etag, rows, loaded_at) VALUES (%s, %s, %s, %s, now())"
-            " ON CONFLICT (dataset, cycle) DO UPDATE SET etag = EXCLUDED.etag, rows = EXCLUDED.rows, loaded_at = now()",
-            (dataset, cycle, etag, rows))
+            "INSERT INTO fec_sync_state (dataset, cycle, etag, rows, roster, loaded_at) VALUES (%s, %s, %s, %s, %s, now())"
+            " ON CONFLICT (dataset, cycle) DO UPDATE SET etag = EXCLUDED.etag, rows = EXCLUDED.rows,"
+            " roster = EXCLUDED.roster, loaded_at = now()",
+            (dataset, cycle, etag, rows, _roster(people)))
         self.stats["files_loaded"] += 1
         self.stats["rows_loaded"] += rows
 
-    def _replace(self, table: str, columns: tuple, where: str, params: tuple, rows: list[tuple], key: int = 0) -> None:
-        """Swap a file's rows in one transaction. A result far smaller than what's stored stops
-        the run instead: that looks like a bad download, not real deletions."""
-        have = self.conn.execute(f"SELECT count(*) AS n FROM {table} WHERE {where}", params).fetchone()["n"]
-        if have >= 10 and len(rows) < have / 2:
+    def _check_shrink(self, table: str, where: str, params: tuple, new_count: int, floor: int = 10) -> None:
+        """A result far smaller than what's stored stops the run: that looks like a bad download, not real
+        deletions. Rows of someone taken off the roster don't count, since they're meant to go."""
+        have = self.conn.execute(
+            f"SELECT count(*) AS n FROM {table} WHERE {where} AND person_pk IN"
+            " (SELECT id FROM money_people WHERE cardinality(fec_candidate_ids) > 0)", params).fetchone()["n"]
+        if have >= floor and new_count < have / 2:
             self.conn.rollback()
-            raise SuspiciousSourceData(f"{table} {params}: file has {len(rows)} rows, we have {have}. Nothing changed.")
+            raise SuspiciousSourceData(f"{table} {params}: file has {new_count} rows, we have {have}. Nothing changed.")
+
+    def _replace(self, table: str, columns: tuple, where: str, params: tuple, rows: list[tuple], key: int = 0) -> None:
+        """Swap a file's rows in one transaction, unless the shrink check stops it."""
+        self._check_shrink(table, where, params, len(rows))
         seen, unique = set(), []
         for row in rows:
             if row[key] not in seen:
@@ -308,6 +377,17 @@ class FecSync:
                 for row in unique:
                     copy.write_row(row)
 
+    def _support_rows(self, prefix: str, cycle: int):
+        """A file another load depends on. A missing one would quietly strip names and committees from what's
+        stored, so from the first cycle that has them all, it stops the run."""
+        name = FecBulk.zip_name(prefix, cycle)
+        info = self.bulk.info(name)
+        if info is not None:
+            return self.bulk.rows(name, info=info)
+        if cycle >= FIRST_LINKAGE_CYCLE:
+            raise SuspiciousSourceData(f"{name} is missing. Nothing changed.")
+        return ()
+
     # ---- One cycle ----------------------------------------------------------------------------
 
     def sync_cycle(self, cycle: int, people: dict[str, int], full: bool, today: date) -> None:
@@ -317,20 +397,20 @@ class FecSync:
         wanted = frozenset(c.encode() for c in committees)
 
         name = FecBulk.zip_name("indiv", cycle)
-        info = self._due("indiv", cycle, name, full, today)
+        info = self._due("indiv", cycle, name, full, today, people)
         if info:
-            rows = [row for r in self.bulk.rows(name, wanted)
+            rows = [row for r in newest_filings(self.bulk.rows(name, wanted, info), "indiv")
                     if (row := contribution_row(r, committees[r[0]], cycle)) is not None]
             self._replace("fec_contributions", CONTRIBUTION_COLUMNS, "cycle = %s AND dataset = 'indiv'", (cycle,), rows)
-            self._record("indiv", cycle, info.etag, len(rows))
+            self._record("indiv", cycle, info.etag, len(rows), people)
             self.conn.commit()
             log.info("FEC %s: %d individual rows", cycle, len(rows))
 
         name = FecBulk.zip_name("oth", cycle)
-        info = self._due("oth", cycle, name, full, today)
+        info = self._due("oth", cycle, name, full, today, people)
         if info:
             receipts, outflows = [], []
-            for r in self.bulk.rows(name, wanted):
+            for r in newest_filings(self.bulk.rows(name, wanted, info), "oth"):
                 tx = r[5].strip() if len(r) > 5 else ""
                 if tx.startswith("2"):
                     if (row := outflow_row(r, committees[r[0]], cycle)) is not None:
@@ -339,39 +419,40 @@ class FecSync:
                     receipts.append(row)
             self._replace("fec_contributions", CONTRIBUTION_COLUMNS, "cycle = %s AND dataset = 'oth'", (cycle,), receipts)
             self._replace("fec_disbursements", DISBURSEMENT_COLUMNS, "cycle = %s AND dataset = 'oth'", (cycle,), outflows)
-            self._record("oth", cycle, info.etag, len(receipts) + len(outflows))
+            self._record("oth", cycle, info.etag, len(receipts) + len(outflows), people)
             self.conn.commit()
 
         name = FecBulk.zip_name("oppexp", cycle)
-        info = self._due("oppexp", cycle, name, full, today)
+        info = self._due("oppexp", cycle, name, full, today, people)
         if info:
-            rows = [row for r in self.bulk.rows(name, wanted)
+            rows = [row for r in newest_filings(self.bulk.rows(name, wanted, info), "oppexp")
                     if (row := expense_row(r, committees[r[0]], cycle)) is not None]
             self._replace("fec_disbursements", DISBURSEMENT_COLUMNS, "cycle = %s AND dataset = 'oppexp'", (cycle,), rows)
-            self._record("oppexp", cycle, info.etag, len(rows))
+            self._record("oppexp", cycle, info.etag, len(rows), people)
             self.conn.commit()
 
         name = FecBulk.zip_name("pas2", cycle)
-        info = self._due("pas2", cycle, name, full, today)
+        info = self._due("pas2", cycle, name, full, today, people)
         if info:
-            givers = {r[0]: r for r in self.bulk.rows(FecBulk.zip_name("cm", cycle)) if r}
+            givers = {r[0]: r for r in self._support_rows("cm", cycle) if r}
             principal = {cid: c for c, cid in self._campaign_committees(cycle).items()}
+            gifts = (r for r in self.bulk.rows(name, info=info)
+                     if len(r) > 16 and r[16] in people and r[5].strip() in GIFT_TYPES)
             rows = []
-            for r in self.bulk.rows(name):
-                if len(r) > 16 and r[16] in people and r[5].strip() in GIFT_TYPES:
-                    recipient = r[15].strip() if r[15].strip() in committees else principal.get(r[16], r[15].strip())
-                    if (row := committee_gift_row(r, people[r[16]], recipient, cycle, givers.get(r[0]))) is not None:
-                        rows.append(row)
+            for r in newest_filings(gifts, "pas2"):
+                recipient = r[15].strip() if r[15].strip() in committees else principal.get(r[16], r[15].strip())
+                if (row := committee_gift_row(r, people[r[16]], recipient, cycle, givers.get(r[0]))) is not None:
+                    rows.append(row)
             self._replace("fec_contributions", CONTRIBUTION_COLUMNS, "cycle = %s AND dataset = 'pas2'", (cycle,), rows)
-            self._record("pas2", cycle, info.etag, len(rows))
+            self._record("pas2", cycle, info.etag, len(rows), people)
             self.conn.commit()
 
         name = FecBulk.ie_name(cycle)
-        info = self._due("ie", cycle, name, full, today)
+        info = self._due("ie", cycle, name, full, today, people)
         if info:
-            rows = outside_rows(self.bulk.csv_rows(name), people, cycle)
+            rows = outside_rows(self.bulk.csv_rows(name, info), people, cycle)
             self._replace("fec_outside", OUTSIDE_COLUMNS, "cycle = %s", (cycle,), rows)
-            self._record("ie", cycle, info.etag, len(rows))
+            self._record("ie", cycle, info.etag, len(rows), people)
             self.conn.commit()
 
     def _campaign_committees(self, cycle: int) -> dict[str, str]:
@@ -383,9 +464,10 @@ class FecSync:
     def _sync_reference(self, cycle: int, people: dict[str, int], full: bool, today: date) -> dict[str, int]:
         """The FEC's totals and committee list. Returns campaign committee -> person for the cycle."""
         name = FecBulk.zip_name("weball", cycle)
-        info = self._due("weball", cycle, name, full, today)
+        info = self._due("weball", cycle, name, full, today, people)
         if info:
-            rows = [totals_row(r, people[r[0]], cycle) for r in self.bulk.rows(name) if r and r[0] in people]
+            rows = [totals_row(r, people[r[0]], cycle) for r in self.bulk.rows(name, info=info) if r and r[0] in people]
+            self._check_shrink("fec_cycles", "cycle = %s", (cycle,), len(rows), floor=1)
             with self.conn.cursor() as cur:
                 cur.execute("DELETE FROM fec_cycles WHERE cycle = %s", (cycle,))
                 cur.executemany(
@@ -394,29 +476,30 @@ class FecSync:
                     " candidate_loans, other_loans, transfers_in, transfers_out, individual_refunds, committee_refunds,"
                     " cash_start, cash_end, debts, coverage_end)"
                     " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", rows)
-            self._record("weball", cycle, info.etag, len(rows))
+            self._record("weball", cycle, info.etag, len(rows), people)
             self.conn.commit()
 
         # The candidate file exists for every cycle. The linkage file only starts in 2000, so for
         # older cycles the candidate file's principal committee is all there is.
         name = FecBulk.zip_name("cn", cycle)
-        info = self._due("cn", cycle, name, full, today)
+        info = self._due("cn", cycle, name, full, today, people)
         if info:
-            names = {r[0]: r for r in self.bulk.rows(FecBulk.zip_name("cm", cycle)) if r}
+            names = {r[0]: r for r in self._support_rows("cm", cycle) if r}
             found: dict[str, tuple] = {}
-            for r in self.bulk.rows(FecBulk.zip_name("ccl", cycle)):
+            for r in self._support_rows("ccl", cycle):
                 if len(r) > 5 and r[0] in people:
                     found[r[3]] = (r[3], cycle, people[r[0]], r[0], C.text(names.get(r[3], ["", None])[1]), r[5],
                                    r[5] in ("P", "A"))
-            for r in self.bulk.rows(name):
+            for r in self.bulk.rows(name, info=info):
                 if len(r) > 9 and r[0] in people and r[9] and r[9] not in found:
                     found[r[9]] = (r[9], cycle, people[r[0]], r[0], C.text(names.get(r[9], ["", None])[1]), "P", True)
+            self._check_shrink("fec_committees", "cycle = %s", (cycle,), len(found), floor=1)
             with self.conn.cursor() as cur:
                 cur.execute("DELETE FROM fec_committees WHERE cycle = %s", (cycle,))
                 cur.executemany(
                     "INSERT INTO fec_committees (committee_id, cycle, person_pk, candidate_id, name, designation, is_campaign)"
                     " VALUES (%s,%s,%s,%s,%s,%s,%s)", list(found.values()))
-            self._record("cn", cycle, info.etag, len(found))
+            self._record("cn", cycle, info.etag, len(found), people)
             self.conn.commit()
 
         rows = self.conn.execute(
@@ -473,13 +556,18 @@ class FecSync:
             " count(*) AS n, row_number() OVER (PARTITION BY person_pk ORDER BY sum(amount) DESC) AS rn"
             f" FROM fec_contributions WHERE {people_filter} AND city IS NOT NULL"
             " GROUP BY person_pk, initcap(city), upper(state)) t WHERE rn <= 15 ORDER BY 1, 3 DESC"))
+        # Same rules as the state rollup: stop-list answers, donors who typed their own name as the
+        # employer ('Michael Murr LLC' for MURR, MICHAEL), and firms with too few donors don't rank.
         add("top_employers", c.execute(
             "SELECT person_pk, employer, total, n FROM ("
             " SELECT person_pk, max(employer) AS employer, sum(amount) AS total, count(*) AS n,"
             " row_number() OVER (PARTITION BY person_pk ORDER BY sum(amount) DESC) AS rn"
-            f" FROM fec_contributions WHERE {people_filter} AND employer IS NOT NULL"
-            " AND upper(employer) !~ '^(N/?A|NONE|NOT EMPLOYED|UNEMPLOYED|RETIRED|SELF|SELF[- ]EMPLOYED|HOMEMAKER|-+|INFORMATION REQUESTED.*)$'"
-            " GROUP BY person_pk, upper(employer)) t WHERE rn <= 15 ORDER BY 1, 3 DESC"))
+            " FROM (SELECT *, array_remove(regexp_split_to_array(replace(upper(name), chr(39), ''), '[^A-Z0-9]+'), '') AS donor,"
+            "   array_remove(regexp_split_to_array(replace(upper(employer), chr(39), ''), '[^A-Z0-9]+'), '') AS works"
+            f"   FROM fec_contributions WHERE {people_filter} AND employer IS NOT NULL AND upper(employer) !~ %s) m"
+            " WHERE NOT (donor <@ works OR works <@ donor)"
+            " GROUP BY person_pk, upper(employer) HAVING count(DISTINCT donor) >= %s) t"
+            " WHERE rn <= 15 ORDER BY 1, 3 DESC", (EMPLOYER_STOP, MIN_EMPLOYER_DONORS)))
         add("by_spend", c.execute(
             "SELECT person_pk, category, sum(amount) AS total, count(*) AS n FROM fec_disbursements"
             " WHERE NOT is_memo GROUP BY 1, 2 ORDER BY 1, 3 DESC"))
@@ -487,8 +575,9 @@ class FecSync:
             "SELECT person_pk, name, total, n FROM ("
             " SELECT person_pk, max(name) AS name, sum(amount) AS total, count(*) AS n,"
             " row_number() OVER (PARTITION BY person_pk ORDER BY sum(amount) DESC) AS rn"
-            " FROM fec_disbursements WHERE name IS NOT NULL AND NOT is_memo GROUP BY person_pk, upper(name)) t"
-            " WHERE rn <= 15 ORDER BY 1, 3 DESC"))
+            " FROM fec_disbursements WHERE name IS NOT NULL AND NOT is_memo AND category <> 'Refunds of contributions'"
+            " AND coalesce(purpose, '') !~* '\\mrefund' AND upper(name) !~ %s"
+            " GROUP BY person_pk, upper(name)) t WHERE rn <= 15 ORDER BY 1, 3 DESC", (PAYEE_LUMP_SUM,)))
         rows = c.execute(
             "WITH item AS (SELECT person_pk, count(*) FILTER (WHERE NOT is_memo) AS n,"
             f"  sum(amount) FILTER (WHERE {people_filter} AND upper(state) = 'WA') AS wa,"
@@ -514,7 +603,7 @@ class FecSync:
                 "id": r["id"], "raised": r["raised"], "spent": r["spent"], "n": r["n"], "first": r["first_cycle"],
                 "last": r["last_cycle"], "latest": r["latest_receipts"], "cash": r["cash_end"], "debts": r["debts"],
                 "items": r["items"] or 0, "wa": r["wa"] or 0, "out": r["out"] or 0,
-                "top": parts[0]["type"] if parts else None, "rollup": Jsonb(rollup),
+                "top": top_source(parts), "rollup": Jsonb(rollup),
             })
         with c.cursor() as cur:
             cur.executemany(
@@ -534,7 +623,8 @@ class FecSync:
             "SELECT sum(from_individuals) AS individuals, sum(itemized_individuals) AS itemized,"
             " sum(from_pacs + from_parties) AS committees, sum(itemized_committees) AS committee_rows,"
             " sum(receipts) AS receipts, sum(disbursements) AS disbursements, sum(itemized_operating) AS operating,"
-            " count(*) AS cycles FROM fec_cycles").fetchone()
+            " count(*) AS cycles, count(*) FILTER (WHERE itemized_operating > disbursements) AS cycles_operating_above_reported"
+            " FROM fec_cycles").fetchone()
         self.conn.commit()
         return {k: float(v or 0) for k, v in r.items()}
 
@@ -558,11 +648,21 @@ def reported_sources(r: dict) -> list[dict]:
     named = [("Political action committees", r["pacs"]), ("Party committees", r["parties"]),
              (C.SELF_FUNDED, r["own"]), ("Other loans", r["loans"]), ("Transfers from other committees", r["transfers"])]
     parts = [{"type": INDIVIDUALS, "total": min(itemized, individuals)},
-             {"type": "Individuals (small gifts, not itemized)", "total": max(individuals - itemized, 0.0)}]
+             {"type": SMALL_GIFTS, "total": max(individuals - itemized, 0.0)}]
     parts += [{"type": label, "total": float(v or 0)} for label, v in named]
     accounted = individuals + sum(float(v or 0) for _, v in named)
     parts.append({"type": "Other receipts (interest, refunds, offsets)", "total": round(float(r["raised"] or 0) - accounted, 2)})
     return sorted([p for p in parts if abs(p["total"]) >= 0.005], key=lambda p: -p["total"])
+
+
+def top_source(parts: list[dict]) -> str | None:
+    """The largest source. Itemized and small gifts are both money from individuals, so they compete as one."""
+    individuals = sum(p["total"] for p in parts if p["type"] in (INDIVIDUALS, SMALL_GIFTS))
+    others = [p for p in parts if p["type"] not in (INDIVIDUALS, SMALL_GIFTS)]
+    largest = max(others, key=lambda p: p["total"], default=None)
+    if individuals > 0 and (largest is None or individuals >= largest["total"]):
+        return "Individuals"
+    return largest["type"] if largest else None
 
 
 def load_federal_roster() -> list[dict]:

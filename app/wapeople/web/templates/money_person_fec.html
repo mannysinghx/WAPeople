@@ -25,7 +25,7 @@
 {% if p.n_campaigns %}
 <nav class="tabs" aria-label="Source of records">
   <a href="/money/{{ p.id }}" aria-current="page">Federal campaigns <span class="count">FEC</span></a>
-  <a href="/money/{{ p.id }}?source=state">Earlier state campaigns <span class="count">{{ p.total_raised | usd_short }}, PDC</span></a>
+  <a href="/money/{{ p.id }}?records=state">Earlier state campaigns <span class="count">{{ p.total_raised | usd_short }}, PDC</span></a>
 </nav>
 {% endif %}
 
@@ -127,7 +127,7 @@
     <details><summary class="small"><strong>{{ other_committees | length - 6 }} more</strong></summary><ul class="list">{% for x in other_committees[6:] %}{{ committee_item(x) }}{% endfor %}</ul></details>
     {% endif %}
     <p class="small muted" style="margin:.75rem 0 0">Separate from the campaign, so not counted in the figures on this page. Their records are on the FEC's site.</p>
-    {% else %}<p class="muted">The FEC doesn't link any leadership or joint fundraising committee to this person.</p>{% endif %}
+    {% else %}<p class="muted">The FEC's candidate-committee linkage file lists no leadership or joint fundraising committee for this person. A committee can still carry this person's name without being listed there.</p>{% endif %}
   </section>
 </div>
 
@@ -234,12 +234,14 @@
 {% else %}<div class="card empty"><p>No payments match.</p></div>{% endif %}
 
 {% elif view == "outside" %}
-<p class="muted">Money others spent to support or oppose {{ p.name }} without coordinating with the campaign, as reported to the FEC. This kind of spending has no contribution limits. The FEC publishes these records from 2010 on.</p>
+<p class="muted">Money others spent to support or oppose {{ p.name }} without coordinating with the campaign, as reported to the FEC. This kind of spending has no contribution limits. Filers sometimes repeat spending in a later report without marking it as an amendment, so these totals can run high. This page uses the FEC's file of 24- and 48-hour independent expenditure reports, which starts with 2010. Earlier spending isn't included, and spending that didn't need one of those reports can be missing.</p>
+{% macro position(code) %}{% if code == "S" %}Supporting{% elif code == "O" %}Opposing{% else %}Not stated{% endif %}{% endmacro %}
 {% if by_spender %}
 <section class="stats" aria-label="Outside spending totals">
   <div class="stat"><div class="n">{{ outside_totals.supporting | usd_short }}</div><div class="l">Spent supporting</div></div>
   <div class="stat"><div class="n">{{ outside_totals.opposing | usd_short }}</div><div class="l">Spent opposing</div></div>
 </section>
+{% if by_spender | rejectattr("support_oppose", "in", ("S", "O")) | list %}<p class="small muted" style="margin:.75rem 0 0">"Not stated" means the report gave no position, so that money is in neither total.</p>{% endif %}
 <h2 style="margin-top:1rem">Who spent it</h2>
 <div class="table-wrap"><table class="rtable">
   <thead><tr><th scope="col">Cycle</th><th scope="col">Spent by</th><th scope="col">Position</th><th scope="col" class="num">Amount</th><th scope="col">Dates</th></tr></thead>
@@ -247,7 +249,7 @@
   <tr>
     <td>{{ x.cycle }}</td>
     <td class="desc">{% if x.spender_id %}<a href="https://www.fec.gov/data/committee/{{ x.spender_id }}/" rel="noopener"><strong>{{ x.spender_name or x.spender_id }}</strong> ↗</a>{% else %}<strong>{{ x.spender_name }}</strong>{% endif %}</td>
-    <td data-label="Position"><span class="badge {{ 'tone-law' if x.support_oppose == 'S' else 'tone-bad' }}">{{ "Supporting" if x.support_oppose == "S" else "Opposing" }}</span></td>
+    <td data-label="Position"><span class="badge {{ 'tone-law' if x.support_oppose == 'S' else 'tone-bad' if x.support_oppose == 'O' else 'tone-muted' }}">{{ position(x.support_oppose) }}</span></td>
     <td data-label="Amount" class="num">{{ x.total | usd_cents }}</td>
     <td data-label="Dates" class="nowrap">{{ x.first_date | date }}{% if x.last_date != x.first_date %} – {{ x.last_date | date }}{% endif %}</td>
   </tr>{% endfor %}</tbody>
@@ -261,7 +263,7 @@
     <td class="nowrap">{{ x.tx_date | date }}</td>
     <td class="desc">{{ x.spender_name or x.spender_id }}</td>
     <td data-label="Paid to">{{ x.payee or "—" }}{% if x.purpose %}<div class="muted small">{{ x.purpose }}</div>{% endif %}</td>
-    <td data-label="Position">{{ "Supporting" if x.support_oppose == "S" else "Opposing" }}</td>
+    <td data-label="Position">{{ position(x.support_oppose) }}</td>
     <td data-label="Amount" class="num">{{ x.amount | usd_cents }}</td>
     <td data-label="Report">{% if x.image_num %}<a href="https://docquery.fec.gov/cgi-bin/fecimg/?{{ x.image_num }}" rel="noopener nofollow">FEC ↗</a>{% endif %}</td>
   </tr>{% endfor %}</tbody>

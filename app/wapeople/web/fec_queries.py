@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import psycopg
 
-from .queries import PAGE_SIZE, Page
+from .queries import PAGE_SIZE, Page, clamp_page
 
 CONTRIBUTION_SORTS = {
     "recent": "tx_date DESC NULLS LAST, sub_id DESC",
@@ -35,6 +35,7 @@ def _page(c, table, where, params, order, page) -> Page:
     w = " WHERE " + " AND ".join(where)
     # Counted rows and the total shown beside them leave out memo entries, unless asked to list them.
     summary = c.execute(f"SELECT count(*) AS n, coalesce(sum(amount) FILTER (WHERE NOT is_memo), 0) AS total FROM {table}{w}", params).fetchone()
+    page = clamp_page(page, summary["n"])
     items = c.execute(f"SELECT * FROM {table}{w} ORDER BY {order} LIMIT %(limit)s OFFSET %(offset)s",
                       {**params, "limit": PAGE_SIZE, "offset": (page - 1) * PAGE_SIZE}).fetchall()
     return Page(items, summary["n"], page, extra={"total": summary["total"]})
@@ -68,11 +69,11 @@ def contributions(c: psycopg.Connection, person_id: int, *, cycle: int | None = 
 
 def top_individuals(c: psycopg.Connection, person_id: int, cycle: int | None = None, limit: int = 15) -> list[dict]:
     return c.execute(
-        "SELECT name, sum(amount) AS total, count(*) AS n, max(employer) AS employer, max(occupation) AS occupation,"
+        "SELECT max(name) AS name, sum(amount) AS total, count(*) AS n, max(employer) AS employer, max(occupation) AS occupation,"
         " max(city) AS city, max(state) AS state FROM fec_contributions"
         " WHERE person_pk = %(p)s AND source_type = 'Individuals (itemized)' AND NOT is_memo"
         " AND (%(cycle)s::int IS NULL OR cycle = %(cycle)s)"
-        " GROUP BY upper(name), name ORDER BY sum(amount) DESC LIMIT %(limit)s",
+        " GROUP BY upper(name) ORDER BY sum(amount) DESC LIMIT %(limit)s",
         {"p": person_id, "cycle": cycle, "limit": limit},
     ).fetchall()
 
@@ -106,6 +107,7 @@ def outside(c: psycopg.Connection, person_id: int, page: int = 1) -> dict:
     where, params = ["person_pk = %(p)s"], {"p": person_id}
     w = " WHERE " + where[0]
     n = c.execute(f"SELECT count(*) AS n FROM fec_outside{w}", params).fetchone()["n"]
+    page = clamp_page(page, n)
     items = c.execute(f"SELECT * FROM fec_outside{w} ORDER BY tx_date DESC NULLS LAST, id LIMIT %(limit)s OFFSET %(offset)s",
                       {**params, "limit": PAGE_SIZE, "offset": (page - 1) * PAGE_SIZE}).fetchall()
     return {"by_spender": by_spender, "outside_totals": totals, "listing": Page(items, n, page)}

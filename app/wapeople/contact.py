@@ -38,14 +38,27 @@ MAX_ATTEMPTS = 5
 # (see /privacy), so the inbox only gets messages from people. Deliberately no language
 # filter: Washingtonians write to us in many languages.
 _SPAM_RE = re.compile(
-    r"<a\s+href=|\[url[=\]]"
-    r"|google'?s search index"
+    r"<a\s[^>]*href=|\[url[=\]]"
     r"|\bai seo\b"
     r"|\bseo\b[^.]{0,120}\b(rank|visib|quote|price)"
     r"|\b(rank|visib|quote|price)[^.]{0,120}\bseo\b"
     r"|search engine optimi[sz]ation"
-    r"|rank higher on google"
-    r"|not showing up in [^.]{0,60}search results",
+    r"|rank higher on google",
+    re.I,
+)
+# Readers write about search too ("HB 1234 isn't showing up in your search results"), so these
+# phrases count only alongside a sales term. Single words that are also bill topics or plain speech
+# (affordable housing, drug pricing, traffic cameras, "I tried several keywords") don't count: each
+# term here has to read as a pitch.
+_SEARCH_RE = re.compile(r"google'?s search index|not showing up in [^.]{0,60}search results", re.I)
+_SALES_RE = re.compile(
+    r"\b(?:(?:submit|list) [\w-]+\.[a-z]{2,}|submit your (?:site|website|url|domain)"
+    r"|(?:majority of|most of|target|relevant|your) keywords|backlinks?"
+    r"|(?:google|search|higher|your) rankings?"
+    r"|affordable (?:seo|packages?|plans?|services?)|our pricing"
+    r"|free (?:audit|quote|trial|report|consultation)|get (?:a |your )?quote"
+    r"|(?:digital|online) marketing|(?:website|organic) traffic"
+    r"|our (?:services?|team|agency|company)|we (?:help|offer|provide|can help)|i can help)\b",
     re.I,
 )
 # Privacy policy commitments (see /privacy): messages are deleted after RETENTION_DAYS, and the
@@ -72,10 +85,10 @@ def token_ok(token: str, now: float | None = None) -> bool:
     try:
         ts, sig = (token or "").split(".", 1)
         age = (now if now is not None else time.time()) - int(ts)
-    except ValueError:
+        good = hmac.new(_key(), ts.encode(), hashlib.sha256).hexdigest()[:32]
+        return hmac.compare_digest(sig.encode(), good.encode()) and MIN_FILL_SECONDS <= age <= TOKEN_MAX_AGE
+    except (ValueError, OverflowError):     # junk, or a timestamp too long to subtract
         return False
-    good = hmac.new(_key(), ts.encode(), hashlib.sha256).hexdigest()[:32]
-    return hmac.compare_digest(sig, good) and MIN_FILL_SECONDS <= age <= TOKEN_MAX_AGE
 
 
 def client_hash(ip: str) -> str:
@@ -90,6 +103,8 @@ def _one_line(s: str, limit: int) -> str:
 def validate(form: dict) -> tuple[dict, dict]:
     """Returns (clean values, errors by field)."""
     errors: dict[str, str] = {}
+    # PostgreSQL text can't store a NUL byte.
+    form = {k: v.replace("\x00", "") if isinstance(v, str) else v for k, v in form.items()}
     topic = form.get("topic") or ""
     if topic not in TOPICS:
         errors["topic"] = "Choose what your message is about."
@@ -128,8 +143,12 @@ def save(conn: psycopg.Connection, clean: dict, chash: str) -> int:
     ).fetchone()["id"]
 
 
-def looks_like_spam(message: str) -> bool:
-    return bool(_SPAM_RE.search(message or ""))
+def looks_like_spam(message: str, topic: str = "") -> bool:
+    """Security reports always go through: they quote markup and payloads on purpose."""
+    if topic == "security":
+        return False
+    message = message or ""
+    return bool(_SPAM_RE.search(message) or (_SEARCH_RE.search(message) and _SALES_RE.search(message)))
 
 
 def email_configured() -> bool:
@@ -196,7 +215,7 @@ def send_pending(conn: psycopg.Connection, limit: int = 20) -> dict:
     conn.commit()
     sent = failed = held = 0
     for r in rows:
-        if looks_like_spam(r["message"]):
+        if looks_like_spam(r["message"], r["topic"]):
             held += 1
             conn.execute("UPDATE contact_messages SET email_status = 'spam' WHERE id = %s", (r["id"],))
             conn.commit()
@@ -219,6 +238,8 @@ def send_pending(conn: psycopg.Connection, limit: int = 20) -> dict:
                 (r["id"],),
             )
         conn.commit()
+    if held:
+        log.warning("contact form: %d message(s) held as likely spam, not emailed", held)
     return {"contact_sent": sent, "contact_failed": failed, **({"contact_spam_held": held} if held else {})}
 
 
@@ -233,5 +254,11 @@ def apply_retention(conn: psycopg.Connection) -> dict:
         "DELETE FROM contact_messages WHERE created_at < now() - make_interval(days => %s)",
         (RETENTION_DAYS,),
     ).rowcount
+    # Held messages aren't emailed, so this daily count is what tells the owner to look at them.
+    # The count only: message contents and addresses are never logged.
+    on_file = conn.execute("SELECT count(*) AS n FROM contact_messages WHERE email_status = 'spam'").fetchone()["n"]
     conn.commit()
-    return {"contact_hashes_cleared": cleared, "contact_deleted": deleted}
+    if on_file:
+        log.warning("contact form: %d message(s) held as likely spam are waiting for review "
+                    "(contact_messages where email_status = 'spam')", on_file)
+    return {"contact_hashes_cleared": cleared, "contact_deleted": deleted, "contact_spam_on_file": on_file}
