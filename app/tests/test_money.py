@@ -165,6 +165,8 @@ def test_ordinary_descriptions_are_untouched(value):
     ("4258778127 Madelynn Sakay", "4258778127", "Madelynn Sakay"),
     ("ARROW LUMBER, ORTING 360.893.2200", "893", "ARROW LUMBER, ORTING"),
     ("Call (206) 555-0142 today", "555", "Call"),
+    ("PETTY CASH INK - WMART YELM, PH#360.400.8050", "400", "PETTY CASH INK"),
+    ("STAMPS - YELM PO, phone# 800.275.8777", "275", "STAMPS"),
     ("Todd Toddbowers66@gmail.com", "gmail", "Todd"),
     ("SARAH@BEEMER-MUMMA.COM", "BEEMER", ""),
 ])
@@ -177,6 +179,7 @@ def test_phone_numbers_and_emails_are_removed_from_free_text(raw, gone, kept):
     "Texting 7-23: 9,205 MMS @0.0450",          # an at sign alone isn't an email address
     "1 sign @38.99",
     "INV 8005551234",                           # ten bare digits without a local area code stay
+    "INVOICE #360-400-8050",                    # after a plain '#' it's a reference number
     "ACCT 1234567890",
     "Printing 21,622 pieces",
 ])

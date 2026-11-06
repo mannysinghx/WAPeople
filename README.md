@@ -84,7 +84,7 @@ office has one page with both, on separate tabs (`?records=state`).
   `data/money_officials.json`. **Update that file when officeholders change** (next: January 2027).
 - **Sync:** `python -m wapeople.sync money` runs in the daily job. It compares each campaign's row count and
   total with the PDC's own and reloads only campaigns that differ (`--full` reloads everything). A first load
-  takes 8 to 16 minutes and adds about 420 MB. Results are in `sync_runs`; `mismatched` should be 0.
+  takes about 11 minutes and adds about 670 MB. Results are in `sync_runs`; `mismatched` should be 0.
 - **Privacy:** the sync's `select` lists never name address, phone or email columns, so those never leave the
   source. Filers also type such details into free-text fields, so `money/clean.py` removes street addresses, PO
   boxes, phone numbers and email addresses from free text by rule, and shortens ZIP codes to five digits. Those
@@ -111,7 +111,9 @@ office has one page with both, on separate tabs (`?records=state`).
 - **How:** `money/fec_bulk.py` reads one member of a remote zip straight off the network with range requests, so
   nothing is written to disk and a dropped connection resumes. Scanning the whole national `indiv24` file takes
   under a minute. `python -m wapeople.sync fec` runs in the daily job, but a file is only read when its ETag
-  changes, and no sooner than weekly for the current cycle or monthly for older ones. `--full` reloads everything.
+  changes, and no sooner than weekly for the current cycle or monthly for older ones. `--full` reloads everything,
+  and a change to the delegation reloads the files on its own. A first load took 7 to 32 minutes, depending on how
+  fast the FEC was serving files, and adds about 275 MB.
 - **Reading the files:** memo code X rows don't count toward totals, types 21Y and 22Y are refunds shown as
   positive numbers, and a committee's gift is in the giver's report (`pas2`), so the giver is the first column.
   See the notes at the top of `money/fec.py`.

@@ -52,9 +52,10 @@ _PO_BOX = re.compile(
     re.I,
 )
 _EMAIL = re.compile(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}")
-# Ten bare digits are usually an invoice or account number, so those need a local area code.
+# Ten bare digits are usually an invoice or account number, so those need a local area code. A number
+# right after '#' is usually one too, unless the filer labelled it a phone ('WMART YELM, PH#360.400.8050').
 _PHONE = re.compile(
-    r"(?<![\d#.-])(?:\+?1[-. ])?"
+    r"(?:(?<![\d#.-])|(?i:(?<=ph#)|(?<=tel#)|(?<=fax#)|(?<=cell#)|(?<=phone#)))(?:\+?1[-. ])?"
     r"(?:\([2-9]\d{2}\)\s?[2-9]\d{2}[-. ]?\d{4}"
     r"|[2-9]\d{2}[-. ][2-9]\d{2}[-. ]\d{4}"
     r"|(?:206|253|360|425|509|564|208|503|541|971)[2-9]\d{6})(?![\d-])"
