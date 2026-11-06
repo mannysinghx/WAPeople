@@ -6,6 +6,7 @@
 {% block robots %}{% if noindex %}<meta name="robots" content="noindex">{% endif %}{% endblock %}
 {% block content %}
 {% set roll = p.fed_rollup or {} %}
+{% set fed = "records=federal&" if p.kind != "federal" else "" %}
 <nav class="crumbs" aria-label="Breadcrumb"><a href="/money">Money trails</a> › {{ p.name }}</nav>
 <section class="card">
   <div class="member-head">
@@ -15,17 +16,23 @@
       <div class="muted">{{ p.title }}{% if p.party in ("D", "R") %} · {{ party(p.party, True) }}{% endif %}{% if p.fed_first_cycle %} · FEC records {{ p.fed_first_cycle }}{% if p.fed_last_cycle != p.fed_first_cycle %}–{{ p.fed_last_cycle }}{% endif %}{% endif %}</div>
       <div class="small" style="margin-top:.25rem">
         {% if p.member_id %}<a href="/legislators/{{ p.member_id }}">State Legislature voting record</a> · {% endif %}
-        <a href="{{ p.source_url }}" rel="noopener">Official page ↗</a>
-        {% for cid in p.fec_candidate_ids %} · <a href="https://www.fec.gov/data/candidate/{{ cid }}/" rel="noopener">FEC record{% if p.fec_candidate_ids | length > 1 %} ({{ "Senate" if cid[0] == "S" else "House" }}){% endif %} ↗</a>{% endfor %}
+        {% if p.source_url %}<a href="{{ p.source_url }}" rel="noopener">Official page ↗</a> · {% endif %}
+        {% for cid in p.fec_candidate_ids %}{% if not loop.first %} · {% endif %}<a href="https://www.fec.gov/data/candidate/{{ cid }}/" rel="noopener">FEC record{% if p.fec_candidate_ids | length > 1 %} ({{ "Senate" if cid[0] == "S" else "House" }}){% endif %} ↗</a>{% endfor %}
       </div>
     </div>
   </div>
 </section>
 
-{% if p.n_campaigns %}
+{% if fed %}
+<nav class="tabs" aria-label="Source of records">
+  <a href="/money/{{ p.id }}">State and local campaigns <span class="count">{{ p.total_raised | usd_short }}, PDC</span></a>
+  <a href="/money/{{ p.id }}?records=federal" aria-current="page">Campaigns for Congress <span class="count">FEC</span></a>
+</nav>
+<p class="muted small" style="margin-top:.5rem">{{ p.name }} holds a state office now. These are campaigns for Congress, reported to the Federal Election Commission, and they're kept apart from state campaign figures.</p>
+{% elif p.n_campaigns %}
 <nav class="tabs" aria-label="Source of records">
   <a href="/money/{{ p.id }}" aria-current="page">Federal campaigns <span class="count">FEC</span></a>
-  <a href="/money/{{ p.id }}?records=state">Earlier state campaigns <span class="count">{{ p.total_raised | usd_short }}, PDC</span></a>
+  <a href="/money/{{ p.id }}?records=state">Earlier state and local campaigns <span class="count">{% if p.total_raised %}{{ p.total_raised | usd_short }}, {% endif %}PDC</span></a>
 </nav>
 {% endif %}
 
@@ -44,7 +51,7 @@
 <nav class="tabs" aria-label="Money records">
   {% set tab_n = {"contributions": counts.contributions, "spending": counts.spending, "outside": counts.outside} %}
   {% for k, label in VIEWS.items() %}
-  <a href="?view={{ k }}"{% if view == k %} aria-current="page"{% endif %}>{{ label }}{% if tab_n.get(k) %} <span class="count">{{ "{:,}".format(tab_n[k]) }}</span>{% endif %}</a>
+  <a href="?{{ fed }}view={{ k }}"{% if view == k %} aria-current="page"{% endif %}>{{ label }}{% if tab_n.get(k) %} <span class="count">{{ "{:,}".format(tab_n[k]) }}</span>{% endif %}</a>
   {% endfor %}
 </nav>
 
@@ -52,13 +59,13 @@
 <div class="grid-2">
   <section class="card">
     <h2>Where the money came from</h2>
-    {{ hbars(roll.by_source or [], "type", 1) }}
-    <p class="small muted" style="margin:.75rem 0 0">These add up to the FEC's reported total. Small gifts are what's left of individuals' money after the itemized gifts: campaigns don't have to name donors of $200 or less. <a href="?view=contributions">See itemized contributions →</a></p>
+    {{ hbars(roll.by_source or [], "type", 1, everything=True) }}
+    <p class="small muted" style="margin:.75rem 0 0">These add up to the FEC's reported total. Small gifts are what's left of individuals' money after the itemized gifts: campaigns don't have to name donors of $200 or less. <a href="?{{ fed }}view=contributions">See itemized contributions →</a></p>
   </section>
   <section class="card">
     <h2>Where the money went</h2>
-    {% if roll.by_spend %}{{ hbars(roll.by_spend, "category", 2) }}{% else %}<p class="muted">No itemized spending on record.</p>{% endif %}
-    <p class="small muted" style="margin:.75rem 0 0">From itemized reports, grouped by the purpose the campaign stated. <a href="?view=spending">See every expense →</a></p>
+    {% if roll.by_spend %}{{ hbars(roll.by_spend, "category", 2, everything=True) }}{% else %}<p class="muted">No itemized spending on record.</p>{% endif %}
+    <p class="small muted" style="margin:.75rem 0 0">From itemized reports, grouped by the purpose the campaign stated. <a href="?{{ fed }}view=spending">See every expense →</a></p>
   </section>
 </div>
 
@@ -70,7 +77,7 @@
     <tbody>
     {% for k in cycles %}
     <tr>
-      <td><a href="?view=contributions&amp;cycle={{ k.cycle }}" rel="nofollow"><strong>{{ k.cycle }}</strong></a></td>
+      <td><a href="?{{ fed }}view=contributions&amp;cycle={{ k.cycle }}" rel="nofollow"><strong>{{ k.cycle }}</strong></a></td>
       <td data-label="Race">{{ "U.S. Senate" if k.office == "S" else "U.S. House" }}{% if k.office == "H" and k.district %}, WA-{{ k.district }}{% endif %}{% if k.coverage_end %}<div class="small muted">Through {{ k.coverage_end | date }}</div>{% endif %}</td>
       <td data-label="Raised" class="num">{{ k.receipts | usd }}</td>
       <td data-label="From individuals" class="num">{{ k.from_individuals | usd_blank }}</td>
@@ -90,7 +97,7 @@
   <section class="card">
     <h2>Top committees that gave</h2>
     {% if roll.top_committees %}{{ hbars(roll.top_committees, "name", 1, limit=15, link=fec_committee_link) }}{% else %}<p class="muted">None on record.</p>{% endif %}
-    <p class="small muted" style="margin:.75rem 0 0">Each links to the committee's FEC page, which shows who funds it. Individual donors are listed under <a href="?view=contributions">Contributions</a>.</p>
+    <p class="small muted" style="margin:.75rem 0 0">Each links to the committee's FEC page, which shows who funds it. Individual donors are listed under <a href="?{{ fed }}view=contributions">Contributions</a>.</p>
   </section>
   <section class="card">
     <h2>Kinds of committees</h2>
@@ -133,7 +140,7 @@
 
 {% elif view == "contributions" %}
 <form class="filters" method="get">
-  <input type="hidden" name="view" value="contributions">
+  <input type="hidden" name="view" value="contributions">{% if fed %}<input type="hidden" name="records" value="federal">{% endif %}
   <div class="wide"><label for="c-q">Donor, employer, occupation or city</label><input id="c-q" type="search" name="q" value="{{ f.q }}" placeholder="e.g. Microsoft or Spokane"></div>
   <div><label for="c-y">Cycle</label><select id="c-y" name="cycle"><option value="">All cycles</option>{% for y in cycle_years %}<option{% if f.cycle == y | string %} selected{% endif %}>{{ y }}</option>{% endfor %}</select></div>
   <div><label for="c-s">Type of donor</label><select id="c-s" name="source"><option value="">Any type</option>{% for s in sources %}<option{% if f.source == s %} selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
@@ -200,7 +207,7 @@
 
 {% elif view == "spending" %}
 <form class="filters" method="get">
-  <input type="hidden" name="view" value="spending">
+  <input type="hidden" name="view" value="spending">{% if fed %}<input type="hidden" name="records" value="federal">{% endif %}
   <div class="wide"><label for="s-q">Paid to, or purpose</label><input id="s-q" type="search" name="q" value="{{ f.q }}" placeholder="e.g. printing"></div>
   <div><label for="s-y">Cycle</label><select id="s-y" name="cycle"><option value="">All cycles</option>{% for y in cycle_years %}<option{% if f.cycle == y | string %} selected{% endif %}>{{ y }}</option>{% endfor %}</select></div>
   <div><label for="s-c">Category</label><select id="s-c" name="category"><option value="">Any category</option>{% for s in roll.by_spend or [] %}<option{% if f.category == s.category %} selected{% endif %}>{{ s.category }}</option>{% endfor %}</select></div>

@@ -15,10 +15,10 @@ GROUPS = {
 }
 PEOPLE_SORTS = {
     # State and federal money are never added together: each person ranks by the figure the table
-    # shows first, which is the FEC's for anyone with federal cycles.
-    "raised": "CASE WHEN p.fed_cycles > 0 THEN p.fed_raised ELSE p.total_raised END DESC, p.name",
-    "latest": "coalesce(p.fed_latest_raised, p.latest_raised) DESC NULLS LAST, p.name",
-    "spent": "CASE WHEN p.fed_cycles > 0 THEN p.fed_spent ELSE p.total_spent END DESC, p.name",
+    # shows first, which is the FEC's for members of Congress and the PDC's for everyone else.
+    "raised": "CASE WHEN p.kind = 'federal' AND p.fed_cycles > 0 THEN p.fed_raised ELSE p.total_raised END DESC, p.name",
+    "latest": "CASE WHEN p.kind = 'federal' AND p.fed_cycles > 0 THEN p.fed_latest_raised ELSE p.latest_raised END DESC NULLS LAST, p.name",
+    "spent": "CASE WHEN p.kind = 'federal' AND p.fed_cycles > 0 THEN p.fed_spent ELSE p.total_spent END DESC, p.name",
     "name": "p.name",
     "district": "NULLIF(p.district, '')::int NULLS LAST, p.chamber DESC, p.name",
 }
@@ -34,13 +34,22 @@ SPENDING_SORTS = {
 }
 
 
+# Without its accents, or under a name they filed campaigns with: 'Valdez (Caldier)'.
+_NAME_MATCH = (
+    "(fold_accents(p.name) ILIKE fold_accents(%(like)s) OR fold_accents(p.name) %% fold_accents(%(q)s)"
+    " OR EXISTS (SELECT 1 FROM money_campaigns k WHERE k.person_pk = p.id"
+    "  AND fold_accents(k.filer_name) ILIKE fold_accents(%(like)s)))"
+)
+
+
 def overview(c: psycopg.Connection) -> dict:
     row = c.execute(
         "SELECT count(*) FILTER (WHERE is_current) AS current_people,"
         " count(*) FILTER (WHERE n_campaigns > 0) AS with_records,"
         " coalesce(sum(total_raised) FILTER (WHERE is_current), 0) AS current_raised,"
         " coalesce(sum(fed_raised) FILTER (WHERE is_current), 0) AS current_fed_raised,"
-        " coalesce(sum(n_contributions + fed_contributions) FILTER (WHERE is_current), 0) AS contributions,"
+        " coalesce(sum(n_contributions) FILTER (WHERE is_current), 0) AS state_contributions,"
+        " coalesce(sum(fed_contributions) FILTER (WHERE is_current), 0) AS fed_contributions,"
         " max(updated_at) AS updated_at FROM money_people"
     ).fetchone()
     row["orgs"] = c.execute("SELECT count(*) AS n FROM money_orgs WHERE total > 0").fetchone()["n"]
@@ -61,7 +70,7 @@ def list_people(c: psycopg.Connection, *, group: str = "all", party: str = "", q
         where.append("p.party = %(party)s")
         params["party"] = party
     if q:
-        where.append("(p.name ILIKE %(like)s OR p.name %% %(q)s)")
+        where.append(_NAME_MATCH)
         params.update(like=f"%{q}%", q=q)
     order = PEOPLE_SORTS.get(sort) or PEOPLE_SORTS["raised"]
     return c.execute(
@@ -118,6 +127,9 @@ def contributions(c: psycopg.Connection, person_id: int, *, year: int | None = N
         where.append("state IS NOT NULL AND upper(state) NOT IN ('WA', 'WASHINGTON')")
     elif state == "NONE":
         where.append("state IS NULL")
+    elif len(state) == 2:       # From the top donors table, where one name in two states is two people.
+        where.append("upper(state) = %(state)s")
+        params["state"] = state.upper()
     if q:
         where.append("(contributor_name ILIKE %(like)s OR employer ILIKE %(like)s OR occupation ILIKE %(like)s"
                      " OR city ILIKE %(like)s)")
@@ -134,12 +146,15 @@ def contributions(c: psycopg.Connection, person_id: int, *, year: int | None = N
 
 def top_individuals(c: psycopg.Connection, person_id: int, year: int | None = None, limit: int = 15) -> list[dict]:
     params = {"p": person_id, "limit": limit, "year": year}
+    # One name in two states is two people, as far as anyone can tell from these reports. Each detail is the
+    # one most often reported, since separate max()es can make up a place no one gave from.
     return c.execute(
         "SELECT contributor_key AS key, max(contributor_name) AS name, sum(amount) AS total, count(*) AS n,"
-        " max(employer) AS employer, max(occupation) AS occupation, max(city) AS city, max(state) AS state"
+        " mode() WITHIN GROUP (ORDER BY employer) AS employer, mode() WITHIN GROUP (ORDER BY occupation) AS occupation,"
+        " mode() WITHIN GROUP (ORDER BY city) AS city, upper(state) AS state"
         " FROM money_contributions WHERE person_pk = %(p)s AND source_type = 'Individuals'"
         " AND (%(year)s::int IS NULL OR election_year = %(year)s)"
-        " GROUP BY contributor_key ORDER BY sum(amount) DESC LIMIT %(limit)s",
+        " GROUP BY contributor_key, upper(state) ORDER BY sum(amount) DESC LIMIT %(limit)s",
         params,
     ).fetchall()
 
@@ -178,15 +193,17 @@ def outside(c: psycopg.Connection, person_id: int) -> dict:
     ).fetchall()
     # Every report a sponsor files restates its funders, so the same gift shows up once per report.
     # Each gift is counted once: one sponsor, funder, date and amount.
+    # ...and however its spelling varies between reports: 'REPUBLICAN GOVERNORS ASSOC' and 'ASSOC.'.
     funders = c.execute(
-        "SELECT g.sponsor_id, max(g.sponsor_name) AS sponsor_name, g.funder_name, max(g.employer) AS employer,"
+        "SELECT g.sponsor_id, max(g.sponsor_name) AS sponsor_name, max(g.funder_name) AS funder_name, max(g.employer) AS employer,"
         " max(g.city) AS city, max(g.state) AS state, sum(g.amount) AS total, count(*) AS n"
-        " FROM (SELECT f.sponsor_id, f.funder_name, f.date_received, f.amount, max(f.sponsor_name) AS sponsor_name,"
+        " FROM (SELECT f.sponsor_id, regexp_replace(upper(f.funder_name), '[^A-Z0-9]+', '', 'g') AS funder_key,"
+        "  max(f.funder_name) AS funder_name, f.date_received, f.amount, max(f.sponsor_name) AS sponsor_name,"
         "  max(f.employer) AS employer, max(f.city) AS city, max(f.state) AS state"
         "  FROM money_outside_funders f"
         "  WHERE f.report_number IN (SELECT report_number FROM money_outside WHERE person_pk = %s)"
-        "  GROUP BY f.sponsor_id, f.funder_name, f.date_received, f.amount) g"
-        " GROUP BY g.sponsor_id, g.funder_name ORDER BY total DESC LIMIT 60",
+        "  GROUP BY f.sponsor_id, funder_key, f.date_received, f.amount) g"
+        " GROUP BY g.sponsor_id, g.funder_key ORDER BY total DESC LIMIT 60",
         (person_id,),
     ).fetchall()
     return {"by_sponsor": by_sponsor, "funders": funders}
@@ -222,11 +239,14 @@ def disclosure(c: psycopg.Connection, person_id: int, disclosure_id: int) -> dic
 
 
 def withhold_locations(statement: dict) -> None:
-    """Treat a statement as a judge's or officer's: no property city or county."""
+    """Treat a statement as a judge's or officer's: no city or county for anything in it. Where they
+    bank says as much about where they live as where their property is."""
     details = statement["details"]
     details["location_withheld"] = True
-    for prop in details.get("real_estate") or []:
-        prop["city"] = prop["county"] = None
+    for section in details.values():
+        for item in section if isinstance(section, list) else []:
+            if isinstance(item, dict):
+                item.update({k: None for k in ("city", "county", "state") if k in item})
 
 
 def tab_counts(c: psycopg.Connection, person_id: int) -> dict:
@@ -274,11 +294,11 @@ def organization(c: psycopg.Connection, key: str) -> dict | None:
     if not org:
         return None
     org["recipients"] = c.execute(
-        "SELECT p.id, p.name, p.title, p.party, p.is_current, p.fec_candidate_ids, sum(m.amount) AS total, count(*) AS n,"
+        "SELECT p.id, p.name, p.kind, p.title, p.party, p.is_current, p.fec_candidate_ids, sum(m.amount) AS total, count(*) AS n,"
         " min(m.election_year) AS first_year, max(m.election_year) AS last_year"
         " FROM money_contributions m JOIN money_people p ON p.id = m.person_pk"
         " WHERE m.contributor_key = %s AND m.is_org"
-        " GROUP BY p.id, p.name, p.title, p.party, p.is_current, p.fec_candidate_ids ORDER BY total DESC",
+        " GROUP BY p.id, p.name, p.kind, p.title, p.party, p.is_current, p.fec_candidate_ids ORDER BY total DESC",
         (key,),
     ).fetchall()
     org["by_year"] = c.execute(
@@ -303,7 +323,8 @@ def known_org_keys(c: psycopg.Connection, keys: list[str]) -> set[str]:
 
 
 def sitemap_orgs(c: psycopg.Connection, limit: int = 20000) -> list[dict]:
-    return c.execute("SELECT key, name FROM money_orgs WHERE total > 0 ORDER BY total DESC LIMIT %s", (limit,)).fetchall()
+    return c.execute("SELECT key, name, total, n_people FROM money_orgs WHERE total > 0 ORDER BY total DESC LIMIT %s",
+                     (limit,)).fetchall()
 
 
 def search_orgs(c: psycopg.Connection, q: str, limit: int = 6) -> list[dict]:
@@ -315,19 +336,27 @@ def search_orgs(c: psycopg.Connection, q: str, limit: int = 6) -> list[dict]:
 
 
 def search_officials(c: psycopg.Connection, q: str, limit: int = 8) -> list[dict]:
-    """Officials who never served in the Legislature, so the members table doesn't have them:
-    statewide officials, justices and members of Congress. Their page is /money/{id}."""
+    """Statewide officials, justices and members of Congress under their current title, whether or not
+    they once served in the Legislature, and anyone found under a name they filed campaigns with.
+    Their page is /money/{id}."""
     return c.execute(
         "SELECT p.id, p.name, p.title, p.party FROM money_people p"
-        " WHERE p.member_id IS NULL AND (p.name ILIKE %(like)s OR p.name %% %(q)s)"
-        " ORDER BY (p.name ILIKE %(like)s) DESC, similarity(p.name, %(q)s) DESC LIMIT %(limit)s",
+        " WHERE " + _NAME_MATCH + " AND (p.kind <> 'legislator' OR NOT"
+        "  (fold_accents(p.name) ILIKE fold_accents(%(like)s) OR fold_accents(p.name) %% fold_accents(%(q)s)))"
+        " ORDER BY (fold_accents(p.name) ILIKE fold_accents(%(like)s)) DESC, similarity(fold_accents(p.name), fold_accents(%(q)s)) DESC"
+        " LIMIT %(limit)s",
         {"like": f"%{q}%", "q": q, "limit": limit},
     ).fetchall()
+
+
+def org_keys_with_pages(c: psycopg.Connection, keys: set[str]) -> set[str]:
+    rows = c.execute("SELECT key FROM money_orgs WHERE key = ANY(%s)", (list(keys),)).fetchall()
+    return {r["key"] for r in rows}
 
 
 def legislator_money(c: psycopg.Connection, member_id: int) -> dict | None:
     """State (PDC) and federal (FEC) totals stay separate: the site says they're never added together."""
     return c.execute(
-        "SELECT id, total_raised AS state_raised, fed_raised, n_campaigns, fed_cycles FROM money_people WHERE member_id = %s",
+        "SELECT id, kind, title, total_raised AS state_raised, fed_raised, n_campaigns, fed_cycles FROM money_people WHERE member_id = %s",
         (member_id,),
     ).fetchone()

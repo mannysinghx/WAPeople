@@ -12,7 +12,8 @@ property locations.
 
 Filers also type those same names and addresses into fields we keep (an asset described as 'for
 Leah Zahn', a creditor named '9800 Roosevelt Condominiums'), so what comes out of the whitelist is
-checked again against the statement's own spouse, dependent and address fields.
+checked again against the statement's own spouse, dependent and address fields, and against the
+family names on the same person's other statements.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ import re
 
 from .clean import ADDRESS_REMOVED
 from .clean import free_text as text
-from .clean import person_shaped, place
+from .clean import is_given_name, person_shaped, place
 from .link import NICKNAMES, name_tokens
 
 WHO = {"filer": "Official", "spouse": "Spouse or partner"}
@@ -96,6 +97,30 @@ def _name_pattern(names: list[str], official: str | None) -> re.Pattern | None:
     return re.compile(r"(?<![\w-])(?:" + "|".join(sorted(alternatives, key=len, reverse=True)) + r")(?![\w])", re.I)
 
 
+# Only part of a name can be listed ('Tina Doe ND' when the spouse field says Christina Doe).
+_GIVEN_BEFORE_MARKER = re.compile(rf"\b[A-Z][A-Za-z]+\s+(?={re.escape(FAMILY_REMOVED)})")
+
+
+def _same_surname(official: str | None) -> re.Pattern | None:
+    """A first and last name using the official's last name. Whether it's them is _someone_else's call."""
+    if len(name_tokens(official)) < 2:
+        return None
+    last = str(official).split()[-1].strip(".,")
+    return re.compile(rf"\b([A-Z][^\W\d_'’-]+)(?:\s+[A-Z]\.?)?\s+(?i:{re.escape(last)})(?![\w-])")
+
+
+def _someone_else(given: str, official: str | None) -> bool:
+    """Only a given name we know counts: Natasha Hill's statement can say Capitol Hill."""
+    own = name_tokens(official)
+    words = name_tokens(given)
+    if not words or not is_given_name(words[0]):
+        return False
+    g = words[0]
+    if g in own or NICKNAMES.get(g) in own or any(NICKNAMES.get(t) == g for t in own):
+        return False
+    return not any(t[:3] == g[:3] for t in own)     # Steve and Steven, Denny and Dennis
+
+
 # ---- Holdings that are a child's --------------------------------------------------------------
 
 # Brokerages and banks with a person's name in them: a spouse named James doesn't make Raymond James family.
@@ -166,28 +191,44 @@ _A_GROUPS_WORK = re.compile(
 _FAMILY_SUPPORT = re.compile(r"\b(?:child support|spousal support|spousal maintenance|alimony)\b", re.I)
 
 
-def _scrub(value, family: re.Pattern | None, home: re.Pattern | None):
+def _scrub(value, family: re.Pattern | None, home: re.Pattern | None, official: str | None = None):
     if isinstance(value, dict):
-        return {k: v if k == "who" else _scrub(v, family, home) for k, v in value.items()}
+        return {k: v if k == "who" else _scrub(v, family, home, official) for k, v in value.items()}
     if isinstance(value, list):
-        return [_scrub(v, family, home) for v in value]
+        return [_scrub(v, family, home, official) for v in value]
     if not isinstance(value, str):
         return value
     if _PERSONAL.search(value) and not _A_GROUPS_WORK.search(value):
         return PERSONAL_REMOVED
     if home and home.search(value):
         return ADDRESS_REMOVED
-    if not family:
+    same_surname = _same_surname(official)
+    if not family and not same_surname:
         return value
+
+    def clean(piece: str) -> str:
+        if family:
+            piece = _GIVEN_BEFORE_MARKER.sub("", family.sub(FAMILY_REMOVED, piece))
+        if same_surname:
+            piece = same_surname.sub(lambda m: FAMILY_REMOVED if _someone_else(m[1], official) else m[0], piece)
+        return piece
+
     pieces = re.split(f"({_FIRMS.pattern})", value, flags=re.I)     # Odd pieces are the firms.
-    return "".join(p if n % 2 else family.sub(FAMILY_REMOVED, p) for n, p in enumerate(pieces))
+    return "".join(p if n % 2 else clean(p) for n, p in enumerate(pieces))
 
 
-def sanitize(raw: dict) -> dict:
+def family_names(raw: dict) -> list[str]:
+    """The spouse and dependent names a statement gives."""
+    s = raw.get("statement", raw) if isinstance(raw, dict) else {}
+    return _names(s.get("spouse")) + _names(s.get("dependents"))
+
+
+def sanitize(raw: dict, other_family: list[str] | tuple = ()) -> dict:
+    """`other_family` is names from the same person's other statements, which can leave these fields empty."""
     s = raw.get("statement", raw) if isinstance(raw, dict) else {}
     person = raw.get("person") if isinstance(raw, dict) and isinstance(raw.get("person"), dict) else {}
     official = person.get("name")
-    family = _name_pattern(_names(s.get("spouse")) + _names(s.get("dependents")), official)
+    family = _name_pattern(family_names(raw) + list(other_family), official)
     dependents = _name_pattern(_names(s.get("dependents")), official)
     private_location = bool(s.get("judge_or_law_enforcement"))
 
@@ -238,14 +279,22 @@ def sanitize(raw: dict) -> dict:
                 for i in _section_items(s.get("lobbies"))]
     return _scrub({"income": income, "accounts": accounts, "businesses": businesses,
                    "real_estate": real_estate, "creditors": creditors, "gifts": gifts, "lobbying": lobbying,
-                   "location_withheld": private_location}, family, _home_addresses(raw if isinstance(raw, dict) else {}, s))
+                   "location_withheld": private_location}, family, _home_addresses(raw if isinstance(raw, dict) else {}, s),
+                  official)
+
+
+def parse(value) -> dict | None:
+    """The dataset's JSON text, or None for older paper filings."""
+    if not value:
+        return None
+    try:
+        doc = json.loads(value)
+    except (ValueError, TypeError):
+        return None
+    return doc if isinstance(doc, dict) else None
 
 
 def from_json(value) -> dict | None:
     """Sanitized details from the dataset's JSON text, or None for older paper filings."""
-    if not value:
-        return None
-    try:
-        return sanitize(json.loads(value))
-    except (ValueError, TypeError):
-        return None
+    doc = parse(value)
+    return sanitize(doc) if doc else None

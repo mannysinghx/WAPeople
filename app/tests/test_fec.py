@@ -15,8 +15,8 @@ from wapeople.money.sync import load_roster
 
 def indiv(tx="15", entity="IND", memo="", amount="3300", name="VAIL, DAVID B", city="TACOMA", zip_code="984150707",
           employer="ACME", occupation="ATTORNEY", sub="4111620241069704958", date_text="08052024", memo_text="",
-          report="Q3", tran="5584161", filing="1827863"):
-    return ["C00345546", "N", report, "P2024", "202410159687666104", tx, entity, name, city, "WA", zip_code, employer,
+          report="Q3", tran="5584161", filing="1827863", image="202410159687666104"):
+    return ["C00345546", "N", report, "P2024", image, tx, entity, name, city, "WA", zip_code, employer,
             occupation, date_text, amount, "", tran, filing, memo, memo_text, sub]
 
 
@@ -167,12 +167,34 @@ def test_a_line_repeated_under_a_new_sub_id_counts_once_at_its_newest_filing(dat
 
 
 @pytest.mark.parametrize("rows", [
-    lambda: [indiv(sub="1"), indiv(sub="2", report="Q2")],
+    lambda: [indiv(sub="1"), indiv(sub="2", report="Q2", image="202407159687666999")],
     lambda: [indiv(sub="1"), indiv(sub="2", date_text="08052022")],
     lambda: [indiv(sub="1"), indiv(sub="2", tran="OTHER")],
 ])
 def test_the_same_transaction_id_in_another_report_or_year_is_a_different_line(rows):
     assert len(F.newest_filings(rows(), "indiv")) == 2
+
+
+def test_the_same_page_under_two_reports_counts_once():
+    # Murray 2004: the same image number under Q1 and Q2, with transaction IDs that don't match.
+    rows = [indiv(sub="1", report="Q1", tran="A"), indiv(sub="2", report="Q2", tran="B")]
+    kept = F.newest_filings(rows, "indiv")
+    assert [r[20] for r in kept] == ["1"]
+
+
+def test_a_page_with_no_transaction_ids_under_two_reports_counts_once():
+    rows = [indiv(sub="1", report="Q1", tran=""), indiv(sub="2", report="Q2", tran="")]
+    assert [r[20] for r in F.newest_filings(rows, "indiv")] == ["1"]
+
+
+def test_two_equal_gifts_on_one_page_of_one_report_both_stay():
+    rows = [indiv(sub="1", tran="A"), indiv(sub="2", tran="B")]
+    assert len(F.newest_filings(rows, "indiv")) == 2
+
+
+def test_rows_with_no_image_number_are_not_treated_as_one_page():
+    rows = [indiv(sub="1", report="Q1", image=""), indiv(sub="2", report="Q2", image="", tran="B")]
+    assert len(F.newest_filings(rows, "indiv")) == 2
 
 
 def test_an_expense_is_matched_within_its_report_year_and_type():
@@ -284,7 +306,7 @@ def test_reported_totals_go_in_the_right_columns():
 
 def test_where_the_money_came_from_adds_up_to_the_reported_total():
     parts = F.reported_sources({"raised": Decimal("1000.00"), "individuals": Decimal("600.00"), "itemized": Decimal("450.00"),
-                                "pacs": Decimal("200.00"), "parties": Decimal("50.00"), "own": Decimal("0"),
+                                "pacs": Decimal("200.00"), "parties": Decimal("50.00"), "own_gifts": Decimal("0"), "own_loans": Decimal("0"),
                                 "loans": Decimal("0"), "transfers": Decimal("100.00")})
     by = {p["type"]: p["total"] for p in parts}
     assert by[F.INDIVIDUALS] == 450 and by["Individuals (small gifts, not itemized)"] == 150
@@ -295,14 +317,21 @@ def test_where_the_money_came_from_adds_up_to_the_reported_total():
 
 def test_itemized_above_the_reported_figure_never_shows_negative_small_gifts():
     parts = F.reported_sources({"raised": Decimal("100"), "individuals": Decimal("100"), "itemized": Decimal("101"),
-                                "pacs": 0, "parties": 0, "own": 0, "loans": 0, "transfers": 0})
+                                "pacs": 0, "parties": 0, "own_gifts": 0, "own_loans": 0, "loans": 0, "transfers": 0})
     assert {p["type"]: p["total"] for p in parts} == {F.INDIVIDUALS: 100}
+
+
+def test_a_candidates_gifts_and_loans_are_separate():
+    # Cantwell: $6.57M given and $9.06M lent. A loan can be paid back, and a gift can't.
+    parts = F.reported_sources({"raised": 150, "individuals": 0, "itemized": 0, "pacs": 0, "parties": 0, "own_gifts": 50,
+                                "own_loans": 100, "loans": 0, "transfers": 0})
+    assert {p["type"]: p["total"] for p in parts} == {C.SELF_FUNDED: 50, "Loans from the candidate": 100}
 
 
 def test_largest_source_treats_itemized_and_small_gifts_as_one_source():
     # DelBene: individuals gave $11.67M and PACs $10.10M, though only $8.77M of the first was itemized.
     parts = F.reported_sources({"raised": 25_000_000, "individuals": 11_668_615.58, "itemized": 8_770_000, "pacs": 10_102_469.06,
-                                "parties": 0, "own": 0, "loans": 0, "transfers": 0})
+                                "parties": 0, "own_gifts": 0, "own_loans": 0, "loans": 0, "transfers": 0})
     assert parts[0]["type"] == "Political action committees"
     assert F.top_source(parts) == "Individuals"
 

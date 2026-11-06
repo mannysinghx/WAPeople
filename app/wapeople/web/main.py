@@ -27,7 +27,7 @@ from ..legislature.parse import (
 )
 from ..legislature.stages import STAGES, next_session_start
 from ..legislature.sync import current_biennium
-from ..money.clean import key_to_slug, person_shaped
+from ..money.clean import keep_out_of_search, key_to_slug
 from . import money_queries as MQ
 from . import queries as Q
 from .middleware import CanonicalHostMiddleware, HeadMiddleware, NulByteMiddleware
@@ -606,9 +606,9 @@ def sitemap_part(request: Request, name: str):
             paths = [f"/legislators/{r['id']}" for r in c.execute("SELECT id FROM members ORDER BY id")]
             paths += [f"/money/{r['id']}" for r in c.execute(
                 "SELECT id FROM money_people WHERE n_campaigns > 0 OR fed_cycles > 0 ORDER BY id")]
-            # A name that reads like a person's stays out, however a filer coded it.
-            paths += [f"/money/organizations/{key_to_slug(r['key'])}"
-                      for r in MQ.sitemap_orgs(c) if not person_shaped(r["name"])]
+            # A name that could be a person's stays out, however a filer coded it.
+            paths += [f"/money/organizations/{key_to_slug(r['key'])}" for r in MQ.sitemap_orgs(c)
+                      if not keep_out_of_search(r["name"], r["total"], r["n_people"])]
         elif name == "court":
             paths = [f"/court/{r['id']}" for r in c.execute("SELECT id FROM court_cases ORDER BY id")]
         elif name.startswith("bills-") and re.fullmatch(r"\d{4}-\d{2}", name[6:]):

@@ -316,7 +316,7 @@ def list_members(
         where.append("mt.district = %(district)s")
         params["district"] = district
     if q:
-        where.append("(m.name ILIKE %(like)s OR m.name %% %(q)s)")
+        where.append("(fold_accents(m.name) ILIKE fold_accents(%(like)s) OR fold_accents(m.name) %% fold_accents(%(q)s))")
         params["like"] = f"%{q}%"
         params["q"] = q
     return c.execute(
@@ -572,8 +572,9 @@ def get_case(c: psycopg.Connection, case_id: int) -> dict | None:
 def search_members(c: psycopg.Connection, q: str, limit: int = 8) -> list[dict]:
     return c.execute(
         "SELECT m.id, m.name, m.party, m.agency, m.district, m.latest_biennium"
-        " FROM members m WHERE m.name ILIKE %(like)s OR m.name %% %(q)s"
-        " ORDER BY (m.name ILIKE %(like)s) DESC, similarity(m.name, %(q)s) DESC, m.latest_biennium DESC NULLS LAST"
+        " FROM members m WHERE fold_accents(m.name) ILIKE fold_accents(%(like)s) OR fold_accents(m.name) %% fold_accents(%(q)s)"
+        " ORDER BY (fold_accents(m.name) ILIKE fold_accents(%(like)s)) DESC, similarity(fold_accents(m.name), fold_accents(%(q)s)) DESC,"
+        " m.latest_biennium DESC NULLS LAST"
         " LIMIT %(limit)s",
         {"like": f"%{q}%", "q": q, "limit": limit},
     ).fetchall()

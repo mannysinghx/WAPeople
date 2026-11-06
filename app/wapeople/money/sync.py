@@ -22,7 +22,7 @@ from psycopg.types.json import Jsonb
 from ..districts import current_biennium_with_roster, delegations
 from . import clean as C
 from . import client as P
-from .disclosure import from_json
+from .disclosure import family_names, parse, sanitize
 from .link import Link, group_by_person, link_member, surname_tokens
 
 log = logging.getLogger(__name__)
@@ -36,15 +36,19 @@ TRAIL_SOURCE_TYPES = ("Political action committees", "Political parties", "Legis
 TRAIL_MIN_GIVEN = 1000
 TRAIL_MAX_AGE_DAYS = 7
 SHRINK_FLOOR = 10       # Tables and batches smaller than this can change completely in normal use.
-# Shown in a committee's list of funders instead of the names of people coded as organizations.
-PEOPLE_CODED_AS_ORGS = "Individuals coded as organizations"
+# Shown in a committee's list of funders instead of names that could be people's. That page is indexed.
+PEOPLE_CODED_AS_ORGS = "Others, who may be individuals"
 # What filers type when they have no employer to give, or their job in place of one. These don't rank.
 EMPLOYER_STOP = (
     r"^(N[./]?A\.?|NONE( GIVEN)?\.?|NOT APPLICABLE|NOT EMPLO[A-Z]*|UN-?EMPLOYED|UNKNOWN|VARIOUS|RET\.?|RETIRED"
     r"|SELF|SELF[- ]*EM[A-Z]*|SELF( -|,) .*|OWNER|BUSINESS OWNER|INDEPENDENT|FREELANCE|PRIVATE PRACTICE"
     r"|HOME|HOME ?MAKER|HOUSEWIFE|STUDENT|ATTORNEY|ATTORNEY AT LAW|CONSULTANT|CONTRACTOR|CEO|PRESIDENT"
-    r"|EXECUTIVE DIRECTOR|MANAGER|ENGINEER|PHYSICIAN|REALTOR|FARMER|[-.?* ]+|(INFO(RMATION)? )?REQUESTED.*)$"
+    r"|EXECUTIVE DIRECTOR|MANAGER|ENGINEER|PHYSICIAN|REALTOR|FARMER|[-.?* ]+|(INFO(RMATION)? )?REQUESTED.*"
+    # Federal files often join employer and occupation: 'RETIRED/RETIRED', 'SELF/DENTIST', 'BEST EFFORT'.
+    r"|(.*/)?(RETIRED|NOT EMPLOYED)(/.*)?|BEST EFFORTS?(/.*)?|SELF/.*)$"
 )
+# So MICROSOFT and MICROSOFT CORPORATION rank as one employer.
+EMPLOYER_GROUP = "regexp_replace(upper(employer), '[,.]*[[:space:]]+(CORP|CORPORATION|INC|INCORPORATED|LLC|LLP|CO|COMPANY|LTD)[.]?$', '')"
 # Report lines that lump small payments together ('EXPENSES OF $50 OR LESS'): nobody was paid that name.
 PAYEE_LUMP_SUM = r"\$[0-9]|^(PAST |CREDIT )?EXPENSES\M"
 # A real employer has several employees giving; below this it is mostly someone's own small firm.
@@ -78,7 +82,7 @@ def _expenditure(r: dict, person: int, _own_names: frozenset[str] = frozenset())
             C.text(r.get("itemized_or_non_itemized")), C.day(r.get("expenditure_date")),
             C.spend_category(r.get("code"), r.get("description"), r.get("recipient_name")),
             C.free_text(r.get("description")),
-            C.free_text(r.get("recipient_name")), C.place(r.get("recipient_city")),
+            C.name_text(r.get("recipient_name")), C.place(r.get("recipient_city")),
             C.text(r.get("recipient_state")), C.zip_code(r.get("recipient_zip")), C.link(r.get("url")))
 
 
@@ -88,7 +92,7 @@ def _loan(r: dict, person: int, _own_names: frozenset[str] = frozenset()) -> tup
             C.money_or_none(r.get("endorser_liable_amount")), C.text(r.get("cash_or_in_kind")),
             C.day(r.get("receipt_date")), C.day(r.get("loan_due_date")), C.text(r.get("repayment_schedule")),
             C.text(r.get("lender_or_endorser")), C.text(r.get("transaction_type")),
-            C.text(r.get("primary_general")), C.free_text(r.get("lenders_name")), C.place(r.get("lenders_city")),
+            C.text(r.get("primary_general")), C.name_text(r.get("lenders_name")), C.place(r.get("lenders_city")),
             C.text(r.get("lenders_state")), C.free_text(r.get("lenders_occupation")),
             C.employer(r.get("lenders_employer")), C.text(r.get("carry_forward_loan")),
             C.free_text(r.get("description")), C.link(r.get("url")))
@@ -99,7 +103,7 @@ def _debt(r: dict, person: int, _own_names: frozenset[str] = frozenset()) -> tup
             r.get("report_number"), C.text(r.get("origin")), C.money(r.get("amount")),
             C.text(r.get("record_type")), C.day(r.get("from_date")), C.day(r.get("thru_date")),
             C.day(r.get("debt_date")), C.text(r.get("code")), C.free_text(r.get("description")),
-            C.free_text(r.get("vendor_name")), C.place(r.get("vendor_city")), C.text(r.get("vendor_state")),
+            C.name_text(r.get("vendor_name")), C.place(r.get("vendor_city")), C.text(r.get("vendor_state")),
             C.link(r.get("url")))
 
 
@@ -107,7 +111,7 @@ def _pledge(r: dict, person: int, _own_names: frozenset[str] = frozenset()) -> t
     return (int(r["id"]), person, int(r["committee_id"]), C.integer(r.get("election_year")),
             r.get("report_number"), C.text(r.get("origin")), C.money(r.get("amount")),
             C.day(r.get("receipt_date")), C.text(r.get("primary_general")), C.text(r.get("code")),
-            C.free_text(r.get("contributor_name")), C.place(r.get("contributor_city")),
+            C.name_text(r.get("contributor_name")), C.place(r.get("contributor_city")),
             C.text(r.get("contributor_state")), C.free_text(r.get("contributor_occupation")),
             C.employer(r.get("contributor_employer_name")), C.link(r.get("url")))
 
@@ -200,7 +204,7 @@ def _merge_funders(orgs: list[dict], limit: int = 30) -> list[dict]:
         name = C.text(o.get("contributor_name"))
         if not name or not C.is_org(o.get("code"), "Organization", name):
             continue
-        if C.person_shaped(name):
+        if C.keep_out_of_search(name, C.money(o.get("s")), C.SEARCHABLE_PEOPLE):
             people = merged.setdefault("", {"name": PEOPLE_CODED_AS_ORGS, "key": "", "total": 0.0, "n": 0,
                                             "type": C.SOURCE_LABELS["Individual"]})
             people["total"] = round(people["total"] + float(C.money(o.get("s"))), 2)
@@ -344,6 +348,14 @@ class MoneySync:
             rows[pk] = {"id": pk, "member_id": member_id if member_id in member_ids else None,
                         "pdc_person_ids": list(person_ids), "link_method": "official roster",
                         "link_note": o.get("pdc_note"), **fields}
+
+        # State officials who also ran for Congress. Their page stays a state page, with a federal tab.
+        for o in roster.get("federal_runs", []):
+            row = rows.get(o["id"])
+            if row:
+                row["fec_candidate_ids"] = sorted({*row["fec_candidate_ids"], *o["fec_candidate_ids"]})
+            else:
+                log.warning("federal run listed for %s, but no person %s", o["name"], o["id"])
 
         self._check_shrink("money_people", len(rows))
         with self.conn.cursor() as cur:
@@ -548,8 +560,8 @@ class MoneySync:
         for batch in P.chunks(sorted(x for x in reports if x), 150):
             where = f"report_number in({P.quoted(batch)}) AND origin like 'C6.5%'"
             for r in self.pdc.rows(P.OUTSIDE, where=where, select=OUTSIDE_FUNDERS_SELECT):
-                name = " ".join(x for x in (C.free_text(r.get("funders_first_name")),
-                                            C.free_text(r.get("funders_name"))) if x)
+                name = " ".join(x for x in (C.name_text(r.get("funders_first_name")),
+                                            C.name_text(r.get("funders_name"))) if x)
                 funders.append((r["id"], r["report_number"], r.get("sponsor_id"), C.text(r.get("sponsor_name")),
                                 name or None, C.place(r.get("funders_city")), C.text(r.get("funders_state")),
                                 C.free_text(r.get("funders_occupation")), C.employer(r.get("funders_employer")),
@@ -586,7 +598,7 @@ class MoneySync:
                 spending.append((int(r["id"]), people[C.integer(r["person_id"])], C.integer(r.get("election_year")),
                                  r.get("report_number"), C.money(r.get("amount")),
                                  C.text(r.get("itemized_or_non_itemized")), C.day(r.get("expenditure_date")),
-                                 C.free_text(r.get("description")), C.free_text(r.get("recipient_name")),
+                                 C.free_text(r.get("description")), C.name_text(r.get("recipient_name")),
                                  C.place(r.get("recipient_city")), C.text(r.get("recipient_state")), C.link(r.get("url"))))
         self._check_shrink("money_surplus", len(accounts))
         self._check_shrink("money_surplus_spending", len(spending))
@@ -619,11 +631,20 @@ class MoneySync:
         # An amended statement keeps its id and gets a new submission_id, so that's how we notice it.
         changed = sorted(i for i, r in remote.items()
                          if i not in local or C.text(r.get("submission_id")) != local[i])
-        details: dict[int, dict | None] = {}
-        for batch in P.chunks(changed, 100):
-            for r in self.pdc.rows(P.DISCLOSURES, where=f"id in({P.quoted(batch)})", select=DISCLOSURE_DETAILS_SELECT):
-                details[int(r["id"])] = from_json(r.get("json"))
         owners = {i: people[C.integer(r["person_id"])] for i, r in remote.items()}
+        # Someone can name a spouse on one statement and leave that field empty on another, so names are
+        # checked across all of a person's statements. A new one can name someone the older ones mention,
+        # so one changed statement rereads them all.
+        touched = {owners[i] for i in changed}
+        rereads = sorted(i for i in remote if owners[i] in touched)
+        raw: dict[int, dict | None] = {}
+        for batch in P.chunks(rereads, 100):
+            for r in self.pdc.rows(P.DISCLOSURES, where=f"id in({P.quoted(batch)})", select=DISCLOSURE_DETAILS_SELECT):
+                raw[int(r["id"])] = parse(r.get("json"))
+        family: dict[int, list[str]] = {}
+        for i, doc in raw.items():
+            family.setdefault(owners[i], []).extend(family_names(doc) if doc else [])
+        details = {i: sanitize(doc, family[owners[i]]) if doc else None for i, doc in raw.items()}
         with self.conn.cursor() as cur:
             cur.execute("DELETE FROM money_disclosures WHERE NOT (id = ANY(%s))", (list(remote),))
             # A statement the details request didn't return keeps what it has and is tried again next run.
@@ -636,7 +657,7 @@ class MoneySync:
                 [(i, C.text(remote[i].get("submission_id")) if i in details else local.get(i), owners[i],
                   C.day(remote[i].get("receipt_date")), C.day(remote[i].get("period_start")),
                   C.day(remote[i].get("period_end")), C.link(remote[i].get("url")),
-                  Jsonb(details[i]) if details.get(i) else None) for i in changed],
+                  Jsonb(details[i]) if details.get(i) else None) for i in sorted({*changed, *details})],
             )
             # A corrected link moves every statement, including the ones that didn't change.
             cur.execute(
@@ -665,10 +686,21 @@ class MoneySync:
         return [r["key"] for r in rows if C.person_shaped(r["name"])
                 or (r["as_person"] >= r["n"] and not C.reads_as_org(r["name"]))]
 
+    def _names_kept_out_of_search(self) -> list[str]:
+        """Organization names that stay off a person's overview, which search engines read. They're still
+        in the Contributions tab, which they don't."""
+        rows = self.conn.execute(
+            "SELECT contributor_key AS key, mode() WITHIN GROUP (ORDER BY contributor_name) AS name,"
+            " sum(amount) AS total, count(DISTINCT person_pk) AS people FROM money_contributions"
+            " WHERE is_org AND contributor_key <> '' GROUP BY 1"
+        ).fetchall()
+        return [r["key"] for r in rows if C.keep_out_of_search(r["name"], r["total"], r["people"])]
+
     def rebuild_rollups(self) -> dict:
         c = self.conn
         roll: dict[int, dict] = {}
         people_as_orgs = self._people_coded_as_orgs()
+        not_on_overview = sorted({*people_as_orgs, *self._names_kept_out_of_search()})
 
         def add(key: str, rows) -> None:
             for r in rows:
@@ -698,7 +730,7 @@ class MoneySync:
             " sum(amount) AS total, count(*) AS n,"
             " row_number() OVER (PARTITION BY person_pk ORDER BY sum(amount) DESC) AS rn"
             " FROM money_contributions WHERE is_org AND contributor_key <> '' AND NOT (contributor_key = ANY(%s))"
-            " GROUP BY 1, 2) t WHERE rn <= 25 ORDER BY 1, 5 DESC", (people_as_orgs,)))
+            " GROUP BY 1, 2) t WHERE rn <= 25 ORDER BY 1, 5 DESC", (not_on_overview,)))
         # A self-employed donor often types their own name as the employer. Comparing words catches
         # 'Michael Murr' and 'Michael Murr LLC' for the donor MURR MICHAEL.
         add("top_employers", c.execute(
@@ -709,7 +741,7 @@ class MoneySync:
             "   array_remove(regexp_split_to_array(replace(upper(employer), chr(39), ''), '[^A-Z0-9]+'), '') AS works"
             "   FROM money_contributions WHERE NOT is_org AND employer IS NOT NULL AND upper(employer) !~ %s) m"
             " WHERE NOT (donor <@ works OR works <@ donor)"
-            " GROUP BY person_pk, upper(employer) HAVING count(DISTINCT contributor_key) >= %s) t"
+            " GROUP BY person_pk, " + EMPLOYER_GROUP + " HAVING count(DISTINCT contributor_key) >= %s) t"
             " WHERE rn <= 15 ORDER BY 1, 3 DESC", (EMPLOYER_STOP, MIN_EMPLOYER_DONORS)))
         add("by_spend", c.execute(
             "SELECT person_pk, category, sum(amount) AS total, count(*) AS n FROM money_expenditures"
@@ -719,9 +751,10 @@ class MoneySync:
             " SELECT person_pk, max(recipient_name) AS name, sum(amount) AS total, count(*) AS n,"
             " row_number() OVER (PARTITION BY person_pk ORDER BY sum(amount) DESC) AS rn"
             " FROM money_expenditures WHERE recipient_name IS NOT NULL AND category <> 'Contribution Refunds'"
+            " AND category <> %s"       # The name on an in-kind row gave to the campaign. It wasn't paid.
             " AND coalesce(description, '') !~* '\\mrefund' AND itemized IS DISTINCT FROM 'Non-itemized'"
             " AND upper(recipient_name) !~ %s"
-            " GROUP BY person_pk, upper(recipient_name)) t WHERE rn <= 15 ORDER BY 1, 3 DESC", (PAYEE_LUMP_SUM,)))
+            " GROUP BY person_pk, upper(recipient_name)) t WHERE rn <= 15 ORDER BY 1, 3 DESC", (C.IN_KIND, PAYEE_LUMP_SUM)))
         for person in roll.values():
             for org in person.get("top_orgs", []):
                 if org["key"] in C.ORG_DISPLAY_NAMES:
@@ -739,7 +772,9 @@ class MoneySync:
             "  FROM money_campaigns GROUP BY 1),"
             " latest AS ("
             "  SELECT DISTINCT ON (person_pk) person_pk, election_year, contributions FROM money_campaigns"
-            "  WHERE coalesce(contributions, 0) <> 0 ORDER BY person_pk, election_year DESC, contributions DESC)"
+            # A committee just opened for a later race isn't the latest campaign in any useful sense.
+            "  WHERE coalesce(contributions, 0) <> 0 ORDER BY person_pk,"
+            "  (election_year <= extract(year FROM current_date)) DESC, election_year DESC, contributions DESC)"
             " SELECT p.id, item.total, item.n AS items, item.wa, item.out, item.unknown, camp.raised, camp.spent,"
             "  camp.n AS campaigns, camp.first_year, camp.last_year, latest.election_year AS latest_year,"
             "  latest.contributions AS latest_raised"

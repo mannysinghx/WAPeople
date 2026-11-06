@@ -23,7 +23,7 @@ def text(value) -> str | None:
 _SUFFIX = (r"st|street|ave|avenue|blvd|boulevard|rd|road|dr|drive|way|ln|lane|ct|court|pl|place|hwy|highway|"
            r"cir|circle|ter|terrace|pkwy|parkway|loop")
 _STREET = re.compile(
-    r"\b[NSEW]?\.?\s?\d{1,6}\s+(?:[NSEW]\.?\s+)?(?:[\w.'-]+\s+){0,4}?"
+    r"\b[NSEW]?\.?\s?\d{1,6}\s+(?:[NSEW]\.?\s+)?(?:[\w.'-]+\s+){1,4}?"     # A street name: '100,000 ct' is a count.
     rf"(?:{_SUFFIX})\b\.?"
     r"(?:\s+[NSEW]{1,2}\b\.?)?(?:[,\s]+(?:suite|ste|unit|apt|#)\s*[\w-]+)?",
     re.I,
@@ -34,18 +34,23 @@ _NUMBERED_STREET = re.compile(
     rf"\b\d{{1,6}}\s+[NSEW]{{1,2}}\.?\s+{_ORDINAL}\.?"
     rf"|\b\d{{1,6}}\s+{_ORDINAL}\s+[NSEW]{{1,2}}\b\.?"
     rf"|\b(?!(?:19|20)\d\d\b)\d{{3,6}}\s+{_ORDINAL}"
-    r"(?!\s+(?:class|quarter|qtr|party|floor|place|annual|anniv|ld|leg|dist))",
+    r"(?!\s+(?:class|quarter|qtr|party|floor|place|annual|anniv|ld|leg|dist))"
+    # 'USPS (1234 S. Pine Tacoma, WA)': no suffix or ZIP, but a directional and the state give it away.
+    r"|\b\d{1,6}\s+[NSEW]\.?\s+(?:[\w'-]+\s+){0,3}[\w'-]+,\s*WA\b",
     re.I,
 )
 # 'QFC 1401 Broadway Seattle, WA 98122': no suffix to recognize, but the state and ZIP give it away.
 # Not a date's year or part of a larger number, and it starts at the last number before the state.
-_CITY_STATE_ZIP = re.compile(r"(?<![\d/,-])\b\d{1,6}\s+(?:(?!\d)[\w.'#-]+,?\s+){1,6}?(?=[A-Z]{2}\s+\d{5}\b)")
+# Filers also glue the number to the word before it ('Paperless Post999 Broadway') and the ZIP to the state.
+_CITY_STATE_ZIP = re.compile(
+    r"(?<![\d/,-])(?:\b|(?<=[a-z]))\d{1,6}\s+(?:(?!\d)[\w.'#-]+,?\s+){1,6}?(?=(?:[A-Z]{2}\s+|WA)\d{5}\b)")
 # '[address removed] West University Pl,': what's left when an address has two street words.
 _AFTER_MARKER = re.compile(rf"(\[address removed\])(?:\s+[\w.'-]+){{1,3}}?\s+(?:{_SUFFIX})\b\.?(?=\s*(?:,|$))", re.I)
 _DOUBLE_MARKER = re.compile(r"(\[address removed\])[\s,#-]*(?:[\w.-]+\s*){0,2}\[address removed\]")
 # Also when glued to the word before it ('COMPANYP.O. BOX 1393'), which needs a number to be sure.
+# Without a number it's only an address when nothing follows: 'PO BOX RENTAL' is an expense.
 _PO_BOX = re.compile(
-    r"(?:\bp\.?\s?o\.?\s*bo?x(?:\s*#?\s*\w*\d\w*)?"
+    r"(?:\bp\.?\s?o\.?\s*bo?x(?:\s*#?\s*\w*\d\w*|\b(?=\s*(?:[,.;)]|$)))"
     r"|\bpost\s+office\s+box\s*#?\s*\d+"
     r"|(?<=[a-z])p\.?\s?o\.?\s*box\s*#?\s*\d+"
     r"|\bpmb\s*#?\s*\d+)",
@@ -110,7 +115,7 @@ def employer(value) -> str | None:
 # House numbers filers' exports leave after a donor's name ('KUPER GLENN 1542'), or a directional and
 # numbered street ('LYON, DOROTHY NE 18TH'). A bare '3RD' stays: it's a generation ('WOLF RUSSELL R 3RD').
 _TRAILING_NUMBER = re.compile(r"[\s,]*\b\d{1,6}(?:\.\d+)?$|(?<=[A-Za-z])\d{1,6}$")
-_TRAILING_NUMBERED_STREET = re.compile(rf"[\s,]+[NSEW]{{1,2}}\.?\s+{_ORDINAL}\.?$", re.I)
+_TRAILING_NUMBERED_STREET = re.compile(rf"[\s,]+[NSEW]{{1,2}}\.?\s+{_ORDINAL}\.?$|[\s,]+\d{{1,6}}\s+[NSEW]{{1,2}}\.?$", re.I)
 _MARKERS = re.compile(rf"\s*(?:{re.escape(ADDRESS_REMOVED)}|{re.escape(PHONE_REMOVED)}|{re.escape(EMAIL_REMOVED)})\s*")
 
 
@@ -129,6 +134,13 @@ def person_name(value) -> str | None:
         if cut == s or len(words) < 2 or _has_org_word(words):
             return s or None
         s = cut
+
+
+def name_text(value) -> str | None:
+    """A payee's, lender's or funder's name. It goes in a list, so what's taken out is left out, not
+    marked: 'NEW DIRECTION PAC', not 'NEW DIRECTION PAC[address removed]'."""
+    s = free_text(value)
+    return (_MARKERS.sub(" ", s).strip(" ,-") or None) if s else None
 
 
 def org_name(value) -> str | None:
@@ -392,10 +404,43 @@ def person_shaped(name) -> bool:
     return len(words) == 3 and len(words[1]) == 1 and words[1] not in "AN"
 
 
+def is_given_name(word: str) -> bool:
+    return word.upper() in _GIVEN_NAMES
+
+
+def could_be_a_person(name) -> bool:
+    """True for person_shaped names, and for any plain two- or three-word name with nothing saying it's an
+    organization. person_shaped needs a given name it knows, and its list misses many, non-Western ones
+    more often. This catches firms too ('MOSS ADAMS'), so it decides what stays out of search engines,
+    not what a thing is called."""
+    if person_shaped(name):
+        return True
+    s = text(name)
+    if not s or re.search(r"[\d@#/&]", s):
+        return False
+    words = name_key(s).split()
+    return 2 <= len(words) <= 3 and not reads_as_org(s)
+
+
+# Plain names at this level are firms (ANHEUSER BUSCH, BNSF RAILWAY), not private donors.
+SEARCHABLE_TOTAL = 5000
+SEARCHABLE_PEOPLE = 3
+
+
+def keep_out_of_search(name, total=0, people=0) -> bool:
+    """Whether a name filers coded as an organization stays off pages search engines read."""
+    if person_shaped(name):
+        return True
+    return could_be_a_person(name) and (float(total or 0) < SEARCHABLE_TOTAL or int(people or 0) < SEARCHABLE_PEOPLE)
+
+
 _CAMPAIGN_WORDS = frozenset(
     "CAMPAIGN CITIZENS CMTE COMM COMMITTE COMMITTEE CTE ELECT FOR FRIEND FRIENDS PEOPLE REELECT VOTERS".split())
 # Organization words that are also how campaigns name themselves: 'Friends of Doe for State Senate'.
-_CAMPAIGN_FILLER = frozenset("CONGRESS HOUSE OF STATE THE".split())
+_CAMPAIGN_FILLER = frozenset("CONGRESS HOUSE OF SENATE STATE THE".split())
+# 'PAM ROACH SENATE TRANSFER'. 'Roach Transfer' alone could be a moving company.
+_TRANSFER_WORDS = frozenset({"TRANSFER", "TRANSFERS"})
+_OFFICE_WORDS = frozenset({"HOUSE", "SENATE"})
 # 'SURPLUS LINE ASSOCIATION' is a trade group, and 'Surplus Funds Back LLC' is a business.
 _SURPLUS_FIRMS = frozenset({"ASSOCIATION", "ASSN", "INC", "LINE", "LINES", "LLC"})
 
@@ -407,8 +452,9 @@ def own_account(name, own_names: frozenset[str]) -> bool:
     words = frozenset(name_key(name).split())
     if any(w.startswith("SURPLUS") for w in words):
         return not words & _SURPLUS_FIRMS
-    return bool(words & own_names and words & _CAMPAIGN_WORDS
-                and not _has_org_word(list(words - own_names - _CAMPAIGN_WORDS - _CAMPAIGN_FILLER)))
+    campaign = words & _CAMPAIGN_WORDS or (words & _TRANSFER_WORDS and words & _OFFICE_WORDS)
+    return bool(words & own_names and campaign
+                and not _has_org_word(list(words - own_names - _CAMPAIGN_WORDS - _CAMPAIGN_FILLER - _TRANSFER_WORDS)))
 
 
 def _is_own_name(name, own_names: frozenset[str]) -> bool:
@@ -466,9 +512,13 @@ def is_org(code, category, name=None, own_names: frozenset[str] = frozenset(), o
 # ---- Where it went -----------------------------------------------------------------------
 
 UNCATEGORIZED = "Not categorized by the filer"
+# Campaigns report goods or services they were given as money in and also as money out, under the giver's name.
+# No cash changed hands, and the name isn't someone they paid, so it needs saying.
+IN_KIND = "In-kind gifts (goods or services, not cash)"
 # Older reports have no category code, only free text. These rules are deliberately narrow:
 # anything they don't clearly recognize stays "not categorized" instead of being guessed at.
 _SPEND_RULES = (
+    (r"\bin[- ]?kind\b", IN_KIND),       # First: an 'in-kind mailer' wasn't printing the campaign paid for.
     (r"\bcable\b.*\binternet\b|\binternet\b.*\bcable\b", "Utilities, phone, and other overhead costs"),
     (r"\b(tv|television|cable|broadcast)\b", "Broadcast/cable TV advertising"),
     (r"\bradio\b", "Radio advertising"),
@@ -501,12 +551,11 @@ _SPEND_RULES = (
     (r"\brent\b|\blease\b", "Rent, lease, mortgage, PO box rental"),
     (r"\brefund", "Contribution Refunds"),
     (r"\bcontribution\b", "Monetary contributions to PAC or candidate"),
-    (r"\bin[- ]?kind\b", "Inkind contribution"),
 )
 _SPEND_RES = [(re.compile(p, re.I), label) for p, label in _SPEND_RULES]
 
 
-_PARTY_OR_CAUCUS = re.compile(r"\b(democrat\w*|republican\w*|repub|gop|caucus|hdcc|hroc|srcc|wsdc|legislative district)\b", re.I)
+_PARTY_OR_CAUCUS = re.compile(r"\b(democrat\w*|democr\w*tic|republican\w*|repub|gop|caucus|hdcc|hroc|srcc|wsdc|legislative district)\b", re.I)
 SURPLUS_TRANSFER = "Transfer to surplus funds account"
 PARTY_TRANSFER = "Transfer to political party or legislative caucus committee"
 
@@ -518,7 +567,7 @@ _NOT_TV_CABLE = re.compile(r"\bties?,? cable\b|\bcable ties?\b|\b(printer|ethern
 def spend_category(code, description, recipient=None) -> str:
     c = text(code)
     if c:
-        return c
+        return IN_KIND if c.casefold().replace("-", "").replace(" ", "") == "inkindcontribution" else c
     d = text(description)
     if d:
         d = _NOT_TV_CABLE.sub(" ", d)

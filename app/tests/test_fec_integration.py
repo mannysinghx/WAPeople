@@ -394,7 +394,7 @@ def test_federal_pages_label_their_source_and_keep_state_money_apart(client):
     assert r.status_code == 200
     assert "$1,000" in r.text and "FEC total" in r.text and "Federal Election Commission" in r.text
     assert "$55,321" not in r.text and "$55K" not in r.text     # 1,000 federal is never added to 54,321 state
-    assert "Earlier state campaigns" in r.text
+    assert "Earlier state and local campaigns" in r.text
     state = client.get("/money/2000099?records=state")
     assert state.status_code == 200 and "Public Disclosure Commission" in state.text
 

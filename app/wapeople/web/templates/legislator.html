@@ -41,7 +41,7 @@
 <nav class="tabs" aria-label="Record">
   <a href="?tab=votes"{% if tab == "votes" %} aria-current="page"{% endif %}>Voting record</a>
   <a href="?tab=bills"{% if tab == "bills" %} aria-current="page"{% endif %}>Sponsored &amp; co-sponsored bills</a>
-  {% if money %}<a href="/money/{{ money.id }}">Money trail{% if money.fed_cycles and money.fed_raised %} <span class="count">{{ money.fed_raised | usd_short }} raised, FEC</span>{% endif %}{% if money.n_campaigns and money.state_raised %} <span class="count">{{ money.state_raised | usd_short }} raised, PDC</span>{% endif %} →</a>{% endif %}
+  {% if money %}<a href="/money/{{ money.id }}">Money trail{% if money.kind != "legislator" %} <span class="count">Now {{ money.title }}</span>{% endif %}{% if money.fed_cycles and money.fed_raised %} <span class="count">{{ money.fed_raised | usd_short }} raised, FEC</span>{% endif %}{% if money.n_campaigns and money.state_raised %} <span class="count">{{ money.state_raised | usd_short }} raised, PDC</span>{% endif %} →</a>{% endif %}
 </nav>
 
 <form class="filters" method="get">

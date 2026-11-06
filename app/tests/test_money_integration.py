@@ -426,7 +426,7 @@ def test_state_and_federal_money_are_never_added(client, federal):
     money = M.legislator_money(client.conn, FED_MEMBER)
     client.conn.commit()
     assert float(money["state_raised"]) == 1275465.52 and float(money["fed_raised"]) == 4751762.65
-    assert set(money) == {"id", "state_raised", "fed_raised", "n_campaigns", "fed_cycles"}
+    assert set(money) == {"id", "kind", "title", "state_raised", "fed_raised", "n_campaigns", "fed_cycles"}
     text = client.get(f"/legislators/{FED_MEMBER}").text
     assert "$6.0M" not in text and "6,027,228" not in text
     assert "$4.8M" in text and "$1.3M" in text      # each figure shown on its own
@@ -452,12 +452,13 @@ def test_contribution_count_is_people_in_office(client):
     from wapeople.web import money_queries as M
 
     c = client.conn
-    before = M.overview(c)["contributions"]
+    before = M.overview(c)
     c.execute("INSERT INTO money_people (id, name, kind, is_current, n_contributions, fed_contributions) VALUES"
               " (2000557, 'Former Person', 'legislator', false, 1000, 500)")
     c.commit()
     try:
-        assert M.overview(c)["contributions"] == before
+        after = M.overview(c)
+        assert (after["state_contributions"], after["fed_contributions"]) == (before["state_contributions"], before["fed_contributions"])
     finally:
         c.rollback()
         c.execute("DELETE FROM money_people WHERE id = 2000557")
@@ -570,7 +571,124 @@ def test_links_to_state_records_use_records_state(client, federal):
     text = client.get(f"/money/{federal}").text
     assert f'href="/money/{federal}?records=state"' in text and "?source=state" not in text
     state = client.get(f"/money/{federal}?records=state").text
-    assert "Earlier state campaigns" in state and "No campaign records on file" not in state
+    assert "Earlier state and local campaigns" in state and "No campaign records on file" not in state
+
+
+@pytest.fixture
+def state_official_who_ran_for_congress(client):
+    """Stays a state official: the page opens on state records, with federal ones a tab away."""
+    c = client.conn
+    c.execute("INSERT INTO money_people (id, name, kind, title, party, is_current, fec_candidate_ids, fed_cycles, fed_raised,"
+              " fed_spent, fed_last_cycle, fed_latest_raised, total_raised, total_spent, n_campaigns, latest_raised, latest_year)"
+              " VALUES (2000700, 'Ran Forcongress', 'statewide', 'Lieutenant Governor', 'D', true, '{H0XX00001}', 2, 9646982, 9000000,"
+              " 2020, 123, 1540000, 1400000, 1, 400000, 2024)")
+    c.commit()
+    yield 2000700
+    c.rollback()
+    c.execute("DELETE FROM money_people WHERE id = 2000700")
+    c.commit()
+
+
+def test_a_state_official_who_ran_for_congress_keeps_a_state_page(client, state_official_who_ran_for_congress):
+    pid = state_official_who_ran_for_congress
+    page = client.get(f"/money/{pid}").text
+    assert "Public Disclosure Commission" in page and "$1.5M" in page
+    assert f'href="/money/{pid}?records=federal"' in page and "Campaigns for Congress" in page
+    assert "records=state" not in page
+
+
+def test_their_federal_tab_stays_on_federal_records(client, state_official_who_ran_for_congress):
+    pid = state_official_who_ran_for_congress
+    page = client.get(f"/money/{pid}?records=federal").text
+    assert "Federal Election Commission" in page and "$9.6M" in page and "holds a state office now" in page
+    assert 'href="?records=federal&amp;view=contributions"' in page and 'href="None"' not in page
+    contributions = client.get(f"/money/{pid}?records=federal&view=contributions").text
+    assert 'name="records" value="federal"' in contributions
+
+
+def test_the_list_ranks_them_by_their_state_figure(client, state_official_who_ran_for_congress):
+    from wapeople.web import money_queries as M
+
+    rows = {r["id"]: r for r in M.list_people(client.conn, sort="raised")}
+    client.conn.commit()
+    assert rows[state_official_who_ran_for_congress]["fed_raised"] > rows[state_official_who_ran_for_congress]["total_raised"]
+    text = client.get("/money?q=Forcongress").text
+    assert "$1,540,000" in text and "$9,646,982" in text
+    assert text.index("$1,540,000") < text.index("$9,646,982")
+    assert "$400,000" in text and "(2024)" in text      # the latest campaign is the state one too
+
+
+def test_search_finds_them_under_their_current_title(client, federal):
+    from wapeople.web import money_queries as M
+
+    found = M.search_officials(client.conn, "Fed Person")
+    client.conn.commit()
+    assert [(r["id"], r["title"]) for r in found] == [(federal, "U.S. Representative")]
+
+
+@pytest.mark.parametrize("query", ["Gonzalez", "González", "gonzalez"])
+def test_search_ignores_accents(client, query):
+    from wapeople.web import money_queries as M
+    from wapeople.web import queries as Q
+
+    c = client.conn
+    c.execute("INSERT INTO money_people (id, name, kind, title, is_current) VALUES (2000701, 'Steven C. González', 'justice', 'Justice', true)")
+    c.execute("INSERT INTO members (id, name, first_name, last_name, agency) VALUES (9701, 'Rebecca Saldaña', 'Rebecca', 'Saldaña', 'Senate')")
+    c.commit()
+    try:
+        assert [r["id"] for r in M.search_officials(c, query)] == [2000701]
+        assert [r["id"] for r in M.list_people(c, q=query)] == [2000701]
+        assert [r["id"] for r in Q.search_members(c, "Saldana")] == [9701]
+    finally:
+        c.rollback()
+        c.execute("DELETE FROM money_people WHERE id = 2000701")
+        c.execute("DELETE FROM members WHERE id = 9701")
+        c.commit()
+
+
+def test_search_finds_a_name_someone_filed_campaigns_under(client):
+    from wapeople.web import money_queries as M
+
+    c = client.conn
+    c.execute("INSERT INTO money_people (id, member_id, name, kind, title, is_current) VALUES (2000702, NULL, 'Michelle Valdez', 'legislator', 'State Representative', true)")
+    c.execute("INSERT INTO money_campaigns (id, person_pk, committee_id, election_year, filer_name)"
+              " VALUES ('ca-702', 2000702, 77702, 2024, 'Michelle Valdez (Michelle Caldier)')")
+    c.commit()
+    try:
+        assert [r["id"] for r in M.search_officials(c, "Caldier")] == [2000702]
+        assert not M.search_officials(c, "Michelle Valdez")      # a legislator already listed under their name
+    finally:
+        c.rollback()
+        c.execute("DELETE FROM money_campaigns WHERE id = 'ca-702'")
+        c.execute("DELETE FROM money_people WHERE id = 2000702")
+        c.commit()
+
+
+def test_one_name_in_two_states_is_two_donors_with_real_places(client, federal):
+    from wapeople.web import fec_queries as F
+
+    c = client.conn
+    for sub, state, city, amount in [(990010, "CO", "DENVER", 12600), (990011, "VA", "WINCHESTER", 2400), (990012, "VA", "WINCHESTER", 100)]:
+        c.execute("INSERT INTO fec_contributions (sub_id, person_pk, committee_id, cycle, dataset, source_type, is_memo, is_refund, name, city, state, amount)"
+                  " VALUES (%s, %s, 'C1', 2024, 'indiv', 'Individuals (itemized)', false, false, 'SMITH, MICHAEL', %s, %s, %s)",
+                  (sub, federal, city, state, amount))
+    c.commit()
+    rows = [(r["city"], r["state"], float(r["total"])) for r in F.top_individuals(c, federal) if r["name"] == "SMITH, MICHAEL"]
+    c.commit()
+    assert rows == [("DENVER", "CO", 12600.0), ("WINCHESTER", "VA", 2500.0)]
+
+
+def test_a_contribution_row_links_only_to_an_organization_page_that_exists(client):
+    c = client.conn
+    row = c.execute("SELECT person_pk, contributor_key FROM money_contributions WHERE is_org AND contributor_key <> '' LIMIT 1").fetchone()
+    c.commit()
+    from wapeople.web import money_queries as M
+
+    known = M.org_keys_with_pages(c, {row["contributor_key"], "NO SUCH ORGANIZATION"})
+    c.commit()
+    assert "NO SUCH ORGANIZATION" not in known
+    page = client.get(f"/money/{row['person_pk']}?view=contributions").text
+    assert "/money/organizations/NO-SUCH-ORGANIZATION" not in page
 
 
 def test_org_recipients_say_who_also_has_federal_records(client, federal):

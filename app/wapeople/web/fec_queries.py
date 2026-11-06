@@ -69,11 +69,14 @@ def contributions(c: psycopg.Connection, person_id: int, *, cycle: int | None = 
 
 def top_individuals(c: psycopg.Connection, person_id: int, cycle: int | None = None, limit: int = 15) -> list[dict]:
     return c.execute(
-        "SELECT max(name) AS name, sum(amount) AS total, count(*) AS n, max(employer) AS employer, max(occupation) AS occupation,"
-        " max(city) AS city, max(state) AS state FROM fec_contributions"
+        # One name in two states is two people, as far as anyone can tell from these reports. Each detail
+        # is the one most often reported, since separate max()es can make up a place no one gave from.
+        "SELECT max(name) AS name, sum(amount) AS total, count(*) AS n, mode() WITHIN GROUP (ORDER BY employer) AS employer,"
+        " mode() WITHIN GROUP (ORDER BY occupation) AS occupation, mode() WITHIN GROUP (ORDER BY city) AS city,"
+        " upper(state) AS state FROM fec_contributions"
         " WHERE person_pk = %(p)s AND source_type = 'Individuals (itemized)' AND NOT is_memo"
         " AND (%(cycle)s::int IS NULL OR cycle = %(cycle)s)"
-        " GROUP BY upper(name) ORDER BY sum(amount) DESC LIMIT %(limit)s",
+        " GROUP BY upper(name), upper(state) ORDER BY sum(amount) DESC LIMIT %(limit)s",
         {"p": person_id, "cycle": cycle, "limit": limit},
     ).fetchall()
 

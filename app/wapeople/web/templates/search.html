@@ -20,7 +20,7 @@
 
 {% if officials %}
 <section style="margin-bottom:1.5rem">
-  <h2>Statewide officials, justices and members of Congress</h2>
+  <h2>Officials and their money trails</h2>
   <div class="chips">
     {% for o in officials %}<a class="chip" href="/money/{{ o.id }}"><strong>{{ o.name }}</strong> <span class="small">{% if o.party in ("D", "R") %}{{ party(o.party) }} · {% endif %}{{ o.title }}</span></a>{% endfor %}
   </div>

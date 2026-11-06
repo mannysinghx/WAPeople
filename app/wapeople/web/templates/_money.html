@@ -1,7 +1,9 @@
 {# Ranked one-hue bars: largest first, value printed at the end of each row. series 1 = money in, 2 = money out. #}
-{% macro hbars(rows, label_key, series=1, limit=12, link=None) -%}
+{# everything=True says rows is a complete list, so whatever doesn't fit gets a last row and the bars still add up. #}
+{% macro hbars(rows, label_key, series=1, limit=12, link=None, everything=False) -%}
 {% set shown = rows[:limit] %}
 {% set top = (shown | map(attribute="total") | max) if shown else 0 %}
+{% set rest = rows[limit:] %}
 <ul class="hbars series-{{ series }}">
   {% for r in shown %}
   <li title="{{ r[label_key] }}: {{ r.total | usd }}{% if r.n %} across {{ '{:,}'.format(r.n) }} record{{ '' if r.n == 1 else 's' }}{% endif %}">
@@ -10,6 +12,14 @@
     <span class="hbar-value">{{ r.total | usd }}</span>
   </li>
   {% endfor %}
+  {% if everything and rest %}
+  {% set rest_total = rest | map(attribute="total") | sum %}
+  <li title="{{ rest | length }} smaller categories: {{ rest_total | usd }}">
+    <span class="hbar-label">Everything else ({{ rest | length }} more)</span>
+    <span class="hbar-track" aria-hidden="true">{% if top > 0 and rest_total > 0 %}<span class="hbar-fill" style="width:{{ [100, 100 * rest_total / top] | min | round(1) }}%"></span>{% endif %}</span>
+    <span class="hbar-value">{{ rest_total | usd }}</span>
+  </li>
+  {% endif %}
 </ul>
 {% if shown | selectattr("total", "lt", -0.5) | list %}<p class="small muted" style="margin:.5rem 0 0">A negative amount is a refund or a correction to an earlier report.</p>{% endif %}
 {%- endmacro %}

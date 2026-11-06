@@ -557,5 +557,85 @@
       "pdc_note": "Filed as Marilyn Strickland; the records are her campaigns for mayor of Tacoma, 2009 and 2013.",
       "source_url": "https://clerk.house.gov/Members/S001159"
     }
+  ],
+  "note_federal_runs": "State officials who also ran for federal office. Checked against the FEC's candidate files on 2026-11-05: the FEC's name, Washington, and a city or race that fits the person. Their page stays a state page, with a federal tab. id is the person's id in money_people. Add one here when a sitting official files for Congress.",
+  "federal_runs": [
+    {
+      "id": 29094,
+      "name": "Matt Boehnke",
+      "fec_candidate_ids": [
+        "H6WA04224"
+      ]
+    },
+    {
+      "id": 17289,
+      "name": "John Braun",
+      "fec_candidate_ids": [
+        "H6WA03275"
+      ]
+    },
+    {
+      "id": 31521,
+      "name": "Rob Chase",
+      "fec_candidate_ids": [
+        "H2WA05048"
+      ]
+    },
+    {
+      "id": 26175,
+      "name": "Beth Doglio",
+      "fec_candidate_ids": [
+        "H0WA10075"
+      ]
+    },
+    {
+      "id": 11999,
+      "name": "Roger Goodman",
+      "fec_candidate_ids": [
+        "H2WA08141"
+      ]
+    },
+    {
+      "id": 1027461,
+      "name": "Denny Heck",
+      "fec_candidate_ids": [
+        "H0WA03161"
+      ]
+    },
+    {
+      "id": 35429,
+      "name": "Natasha Hill",
+      "fec_candidate_ids": [
+        "H2WA05105"
+      ]
+    },
+    {
+      "id": 12072,
+      "name": "Steve Hobbs",
+      "fec_candidate_ids": [
+        "H2WA01179"
+      ]
+    },
+    {
+      "id": 13546,
+      "name": "Marko Liias",
+      "fec_candidate_ids": [
+        "H2WA01161"
+      ]
+    },
+    {
+      "id": 17221,
+      "name": "Drew MacEwen",
+      "fec_candidate_ids": [
+        "H4WA06133"
+      ]
+    },
+    {
+      "id": 27182,
+      "name": "Kristine Reeves",
+      "fec_candidate_ids": [
+        "H0WA10042"
+      ]
+    }
   ]
 }

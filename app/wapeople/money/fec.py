@@ -33,7 +33,7 @@ from psycopg.types.json import Jsonb
 
 from . import clean as C
 from .fec_bulk import FecBulk
-from .sync import EMPLOYER_STOP, MIN_EMPLOYER_DONORS, PAYEE_LUMP_SUM, SuspiciousSourceData
+from .sync import EMPLOYER_GROUP, EMPLOYER_STOP, MIN_EMPLOYER_DONORS, PAYEE_LUMP_SUM, SuspiciousSourceData
 
 log = logging.getLogger(__name__)
 
@@ -243,7 +243,27 @@ def newest_filings(rows, dataset: str) -> list[list[str]]:
         filing = int(r[file_col]) if r[file_col].strip().isdigit() else 0
         if key not in newest or filing > newest[key][0]:
             newest[key] = (filing, r)
-    return unmatched + [r for _, r in newest.values()]
+    return _one_report_per_page(unmatched + [r for _, r in newest.values()], dataset)
+
+
+# A filing can list the same pages under two report types (Murray 2004: Q1 and Q2, with no matching
+# transaction IDs), which doubled $361,563 of gifts. An image number is one physical page, so the same line
+# on the same page under another report is that line again. Two equal lines under one report both stay.
+def _one_report_per_page(rows: list[list[str]], dataset: str) -> list[list[str]]:
+    if dataset not in ("indiv", "oth", "pas2"):
+        return rows
+    reports: dict[tuple, set] = {}
+
+    def line(r: list[str]) -> tuple:
+        return (r[0], r[4].strip(), r[5].strip(), r[7].strip().upper(), r[13].strip(), r[14].strip())
+
+    def on_a_page(r: list[str]) -> bool:
+        return len(r) > 14 and bool(r[4].strip())
+
+    for r in rows:
+        if on_a_page(r):
+            reports.setdefault(line(r), set()).add(r[2].strip())
+    return [r for r in rows if not on_a_page(r) or r[2].strip() == min(reports[line(r)])]
 
 
 def outside_rows(rows, people: dict[str, int], cycle: int) -> list[tuple]:
@@ -566,7 +586,7 @@ class FecSync:
             "   array_remove(regexp_split_to_array(replace(upper(employer), chr(39), ''), '[^A-Z0-9]+'), '') AS works"
             f"   FROM fec_contributions WHERE {people_filter} AND employer IS NOT NULL AND upper(employer) !~ %s) m"
             " WHERE NOT (donor <@ works OR works <@ donor)"
-            " GROUP BY person_pk, upper(employer) HAVING count(DISTINCT donor) >= %s) t"
+            " GROUP BY person_pk, " + EMPLOYER_GROUP + " HAVING count(DISTINCT donor) >= %s) t"
             " WHERE rn <= 15 ORDER BY 1, 3 DESC", (EMPLOYER_STOP, MIN_EMPLOYER_DONORS)))
         add("by_spend", c.execute(
             "SELECT person_pk, category, sum(amount) AS total, count(*) AS n FROM fec_disbursements"
@@ -586,7 +606,7 @@ class FecSync:
             " totals AS (SELECT person_pk, sum(receipts) AS raised, sum(disbursements) AS spent, count(*) AS n,"
             "  min(cycle) AS first_cycle, max(cycle) AS last_cycle, sum(from_individuals) AS individuals,"
             "  sum(itemized_individuals) AS itemized, sum(from_pacs) AS pacs, sum(from_parties) AS parties,"
-            "  sum(candidate_contributions + candidate_loans) AS own, sum(other_loans) AS loans,"
+            "  sum(candidate_contributions) AS own_gifts, sum(candidate_loans) AS own_loans, sum(other_loans) AS loans,"
             "  sum(transfers_in) AS transfers FROM fec_cycles GROUP BY 1),"
             " latest AS (SELECT DISTINCT ON (person_pk) person_pk, receipts, cash_end, debts FROM fec_cycles"
             "  ORDER BY person_pk, cycle DESC, receipts DESC)"
@@ -646,7 +666,8 @@ def reported_sources(r: dict) -> list[dict]:
     itemized = float(r["itemized"] or 0)
     individuals = float(r["individuals"] or 0)
     named = [("Political action committees", r["pacs"]), ("Party committees", r["parties"]),
-             (C.SELF_FUNDED, r["own"]), ("Other loans", r["loans"]), ("Transfers from other committees", r["transfers"])]
+             (C.SELF_FUNDED, r["own_gifts"]), ("Loans from the candidate", r["own_loans"]), ("Other loans", r["loans"]),
+             ("Transfers from other committees", r["transfers"])]
     parts = [{"type": INDIVIDUALS, "total": min(itemized, individuals)},
              {"type": SMALL_GIFTS, "total": max(individuals - itemized, 0.0)}]
     parts += [{"type": label, "total": float(v or 0)} for label, v in named]

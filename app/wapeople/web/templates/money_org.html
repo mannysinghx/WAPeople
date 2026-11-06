@@ -50,7 +50,7 @@
     <tbody>
     {% for r in org.recipients %}
     <tr>
-      <td><a href="/money/{{ r.id }}?{% if r.fec_candidate_ids %}records=state&amp;{% endif %}view=contributions&amp;donor={{ org.key | urlencode }}" rel="nofollow"><strong>{{ r.name }}</strong></a>{% if r.party in ("D", "R") %} <span class="small">{{ party(r.party) }}</span>{% endif %}</td>
+      <td><a href="/money/{{ r.id }}?{% if r.kind == "federal" and r.fec_candidate_ids %}records=state&amp;{% endif %}view=contributions&amp;donor={{ org.key | urlencode }}" rel="nofollow"><strong>{{ r.name }}</strong></a>{% if r.party in ("D", "R") %} <span class="small">{{ party(r.party) }}</span>{% endif %}</td>
       <td data-label="Office">{{ r.title }}</td>
       <td data-label="Total" class="num">{{ r.total | usd }}</td>
       <td data-label="Gifts" class="num">{{ r.n }}</td>
@@ -68,7 +68,7 @@
   <table class="rtable">
     <thead><tr><th scope="col">Date</th><th scope="col">To</th><th scope="col" class="num">Amount</th><th scope="col">Type</th><th scope="col">Report</th></tr></thead>
     <tbody>
-    {% set has_federal = org.recipients | selectattr("fec_candidate_ids") | map(attribute="id") | list %}
+    {% set has_federal = org.recipients | selectattr("kind", "equalto", "federal") | selectattr("fec_candidate_ids") | map(attribute="id") | list %}
     {% for g in org.recent %}
     <tr>
       <td class="nowrap">{{ g.receipt_date | date }}</td>

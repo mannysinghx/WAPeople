@@ -101,12 +101,13 @@ def test_people_coded_as_organizations_are_a_total_without_names():
     funders = S._merge_funders([
         {"contributor_name": "Shirley Keen", "code": "Business", "s": "2834.00", "n": "26"},
         {"contributor_name": "ANNE STAFFORD", "code": "Other", "s": "2475.00", "n": "3"},
-        {"contributor_name": "MOSS ADAMS", "code": "Business", "s": "900.00", "n": "2"},
+        {"contributor_name": "EUNDUK CHOI", "code": "Business", "s": "900.00", "n": "2"},   # not a name our list knows
+        {"contributor_name": "ANHEUSER BUSCH", "code": "Business", "s": "9000.00", "n": "2"},
         {"contributor_name": "MISCELLANEOUS RECEIPTS", "code": "Other", "s": "5000.00", "n": "1"},
     ])
     assert [(f["name"], f["key"], f["total"], f["n"]) for f in funders] == [
-        (S.PEOPLE_CODED_AS_ORGS, "", 5309.0, 29), ("MOSS ADAMS", "MOSS ADAMS", 900.0, 2)]
-    assert "KEEN" not in json.dumps(funders).upper()
+        ("ANHEUSER BUSCH", "ANHEUSER BUSCH", 9000.0, 2), (S.PEOPLE_CODED_AS_ORGS, "", 6209.0, 31)]
+    assert "KEEN" not in json.dumps(funders).upper() and "CHOI" not in json.dumps(funders).upper()
 
 
 @pytest.mark.parametrize("placeholder", [
@@ -342,7 +343,7 @@ def stored(c, statement_id) -> dict:
 
 
 @needs_db
-def test_an_amended_statement_reloads_and_an_unchanged_one_does_not(conn):
+def test_an_amended_statement_rereads_that_persons_others_and_no_one_elses(conn):
     person(conn)
     conn.commit()
     both = {"41": statement("First Job"), "42": statement("Second Job")}
@@ -353,11 +354,35 @@ def test_an_amended_statement_reloads_and_an_unchanged_one_does_not(conn):
     assert MoneySync(conn, pdc).sync_disclosures() == {"disclosures": 2, "disclosures_new": 0}
     assert not pdc.asked_for_details()
 
-    pdc = StatementsPDC({"41": "B", "42": "A"}, {"41": statement("Port of Tacoma"), "42": statement("Wrong")})
-    assert MoneySync(conn, pdc).sync_disclosures() == {"disclosures": 2, "disclosures_new": 1}
-    amended, unchanged = stored(conn, 41), stored(conn, 42)
+    person(conn, 2, "Other Person", (502,))
+    conn.execute("INSERT INTO money_disclosures (id, submission_id, person_pk, details) VALUES (43, 'A', 2, %s)",
+                 (json.dumps({"income": [{"source": "Untouched"}]}),))
+    conn.commit()
+
+    class TwoPeople(StatementsPDC):
+        def answer(self, dataset, where, select):
+            if select == S.DISCLOSURE_SELECT:
+                return [*super().answer(dataset, where, select), {"id": "43", "submission_id": "A", "person_id": "502"}]
+            return super().answer(dataset, where, select)
+
+    pdc = TwoPeople({"41": "B", "42": "A"}, {"41": statement("Port of Tacoma"), "42": statement("Reread"),
+                                             "43": statement("Should Not Be Asked For")})
+    assert MoneySync(conn, pdc).sync_disclosures() == {"disclosures": 3, "disclosures_new": 1}
+    amended, same_person, someone_else = stored(conn, 41), stored(conn, 42), stored(conn, 43)
     assert amended["submission_id"] == "B" and "Port of Tacoma" in json.dumps(amended["details"])
-    assert "Second Job" in json.dumps(unchanged["details"])
+    assert "Reread" in json.dumps(same_person["details"]) and same_person["submission_id"] == "A"
+    assert "Untouched" in json.dumps(someone_else["details"])
+
+
+@needs_db
+def test_a_spouse_named_on_one_statement_is_removed_from_the_persons_others(conn):
+    person(conn)
+    conn.commit()
+    names = json.dumps({"person": {"name": "Jane Doe"}, "statement": {"spouse": "Paula Rivers"}})
+    other = json.dumps({"person": {"name": "Jane Doe"}, "statement": {"income": {"data": [
+        {"who": ["spouse"], "name": "Paula Rivers Consulting", "why": "Wages", "income": "30000-59999"}]}}})
+    MoneySync(conn, StatementsPDC({"41": "A", "42": "A"}, {"41": names, "42": other})).sync_disclosures()
+    assert "Rivers" not in json.dumps(stored(conn, 42)["details"])
 
 
 @needs_db

@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from ..db import conn
-from ..money.clean import key_to_slug, person_shaped, slug_to_key
+from ..money.clean import keep_out_of_search, key_to_slug, slug_to_key
 from . import fec_queries as F
 from . import money_queries as M
 
@@ -105,6 +105,8 @@ def _state_page(c: psycopg.Connection, person: dict, view: str, y: int | None, q
         # The summary table only makes sense when the list below isn't narrowed further.
         narrowed = source or state or q or _amount(min_amount) or donor
         ctx["individuals"] = [] if narrowed else M.top_individuals(c, pid, year=y)
+        ctx["org_pages"] = M.org_keys_with_pages(c, {x["contributor_key"] for x in ctx["listing"].items
+                                                     if x["is_org"] and x["contributor_key"]})
     elif view == "spending":
         ctx["listing"] = M.spending(c, pid, year=y, category=category, q=q, sort=sort, page=page)
     elif view == "debts":
@@ -157,7 +159,7 @@ def build_router(render: Callable) -> APIRouter:
             known = M.known_org_keys(c, [f["key"] for f in upstream["funders"]]) if upstream else set()
         # A filer can code a person as a business. Such a name may still be reached by a link, but
         # it must not be indexed: the site promises not to list individual donors in search engines.
-        noindex = person_shaped(org["name"])
+        noindex = keep_out_of_search(org["name"], org["total"], org["n_people"])
         response = render(request, "money_org.html", org=org, known=known, noindex=noindex,
                           canonical_path=f"/money/organizations/{key_to_slug(org['key'])}")
         if noindex:
@@ -175,7 +177,9 @@ def build_router(render: Callable) -> APIRouter:
             person = M.get_person(c, person_id)
             if not person:
                 raise HTTPException(404)
-            if person["fec_candidate_ids"] and records != "state":
+            # A member of Congress's page opens on federal records, anyone else's on state records.
+            federal_first = person["kind"] == "federal"
+            if person["fec_candidate_ids"] and (records == "federal" or (federal_first and records != "state")):
                 template = "money_person_fec.html"
                 ctx = _federal_page(c, person, view, q, source, state, min, category, sort, cycle, memo, _page(page))
             else:

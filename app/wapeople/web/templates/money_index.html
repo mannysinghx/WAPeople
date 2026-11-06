@@ -16,7 +16,8 @@
   <div class="stat"><div class="n">{{ stats.current_people }}</div><div class="l">Elected officials in office</div></div>
   <div class="stat"><div class="n">{{ stats.current_raised | usd_short }}</div><div class="l">Raised in state campaigns on record (PDC)</div></div>
   {% if stats.current_fed_raised %}<div class="stat"><div class="n">{{ stats.current_fed_raised | usd_short }}</div><div class="l">Raised in federal campaigns on record (FEC)</div></div>{% endif %}
-  <div class="stat"><div class="n">{{ "{:,}".format(stats.contributions) }}</div><div class="l">Itemized contributions to officials in office</div></div>
+  <div class="stat"><div class="n">{{ "{:,}".format(stats.state_contributions) }}</div><div class="l">State contribution records for officials in office</div></div>
+  {% if stats.fed_contributions %}<div class="stat"><div class="n">{{ "{:,}".format(stats.fed_contributions) }}</div><div class="l">Federal contribution records for officials in office</div></div>{% endif %}
   <div class="stat"><a class="card-link" href="/money/organizations"><div class="n">{{ "{:,}".format(stats.orgs) }}</div><div class="l">Organizations that gave to current and former state officials →</div></a></div>
 </section>
 
@@ -66,19 +67,20 @@
   <thead><tr><th scope="col">Name</th><th scope="col">Office</th><th scope="col" class="num">Raised, all campaigns</th>{% if f.sort == "spent" %}<th scope="col" class="num">Spent, all campaigns</th>{% endif %}<th scope="col" class="num">Latest campaign</th><th scope="col" class="num">From Washington</th><th scope="col">Largest source</th></tr></thead>
   <tbody>
   {% for m in people %}
+  {% set fed_first = m.kind == "federal" and m.fed_cycles %}
   <tr>
     <td><a href="/money/{{ m.id }}"><strong>{{ m.name }}</strong></a>{% if m.party in ("D", "R") %} <span class="small">{{ party(m.party) }}</span>{% endif %}</td>
     <td data-label="Office">{{ m.title }}</td>
     <td data-label="Raised" class="num">
-      {% if m.fed_cycles %}{{ m.fed_raised | usd }} <span class="muted small">FEC</span>{% if m.n_campaigns %}<div class="small muted">{{ m.total_raised | usd }} PDC</div>{% endif %}
-      {% elif m.fec_candidate_ids %}<span class="muted">Loading</span>
-      {% elif m.n_campaigns %}{{ m.total_raised | usd }}{% else %}<span class="muted">None linked</span>{% endif %}
+      {% if fed_first %}{{ m.fed_raised | usd }} <span class="muted small">FEC</span>{% if m.n_campaigns and m.total_raised %}<div class="small muted">{{ m.total_raised | usd }} PDC</div>{% endif %}
+      {% elif m.kind == "federal" and m.fec_candidate_ids %}<span class="muted">Loading</span>
+      {% elif m.n_campaigns %}{{ m.total_raised | usd }}{% if m.fed_cycles and m.fed_raised %}<div class="small muted">{{ m.fed_raised | usd }} FEC</div>{% endif %}{% else %}<span class="muted">None linked</span>{% endif %}
     </td>
-    {% if f.sort == "spent" %}<td data-label="Spent" class="num">{% if m.fed_cycles %}{{ m.fed_spent | usd }} <span class="muted small">FEC</span>{% elif m.n_campaigns %}{{ m.total_spent | usd }}{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
-    <td data-label="Latest" class="num">{% if m.fed_latest_raised is not none %}{{ m.fed_latest_raised | usd }} <span class="muted small">({{ m.fed_last_cycle }})</span>{% elif m.latest_raised is not none %}{{ m.latest_raised | usd }} <span class="muted small">({{ m.latest_year }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
-    {% set wa = m.fed_in_state if m.fed_cycles else m.in_state %}{% set away = m.fed_out_of_state if m.fed_cycles else m.out_of_state %}
-    <td data-label="From Washington" class="num">{% if wa + away > 0 %}{{ (100 * wa / (wa + away)) | round | int }}%{% if m.fed_cycles %}<div class="small muted">individual gifts</div>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
-    <td data-label="Largest source">{{ m.fed_top_source or m.top_source or "—" }}</td>
+    {% if f.sort == "spent" %}<td data-label="Spent" class="num">{% if fed_first %}{{ m.fed_spent | usd }} <span class="muted small">FEC</span>{% elif m.n_campaigns %}{{ m.total_spent | usd }}{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
+    <td data-label="Latest" class="num">{% if fed_first and m.fed_latest_raised is not none %}{{ m.fed_latest_raised | usd }} <span class="muted small">({{ m.fed_last_cycle }})</span>{% elif m.latest_raised is not none %}{{ m.latest_raised | usd }} <span class="muted small">({{ m.latest_year }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    {% set wa = m.fed_in_state if fed_first else m.in_state %}{% set away = m.fed_out_of_state if fed_first else m.out_of_state %}
+    <td data-label="From Washington" class="num">{% if wa + away > 0 %}{{ (100 * wa / (wa + away)) | round | int }}%{% if fed_first %}<div class="small muted">individual gifts</div>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td data-label="Largest source">{{ (m.fed_top_source if fed_first else m.top_source) or "—" }}</td>
   </tr>
   {% endfor %}
   </tbody>

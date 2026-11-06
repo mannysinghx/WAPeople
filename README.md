@@ -84,7 +84,7 @@ office has one page with both, on separate tabs (`?records=state`).
   `data/money_officials.json`. **Update that file when officeholders change** (next: January 2027).
 - **Sync:** `python -m wapeople.sync money` runs in the daily job. It compares each campaign's row count and
   total with the PDC's own and reloads only campaigns that differ (`--full` reloads everything). A first load
-  takes about 11 minutes and adds about 670 MB. Results are in `sync_runs`; `mismatched` should be 0.
+  takes 11 to 14 minutes and adds about 700 MB. Results are in `sync_runs`; `mismatched` should be 0.
 - **Privacy:** the sync's `select` lists never name address, phone or email columns, so those never leave the
   source. Filers also type such details into free-text fields, so `money/clean.py` removes street addresses, PO
   boxes, phone numbers and email addresses from free text by rule, and shortens ZIP codes to five digits. Those
@@ -113,7 +113,7 @@ office has one page with both, on separate tabs (`?records=state`).
   under a minute. `python -m wapeople.sync fec` runs in the daily job, but a file is only read when its ETag
   changes, and no sooner than weekly for the current cycle or monthly for older ones. `--full` reloads everything,
   and a change to the delegation reloads the files on its own. A first load took 7 to 32 minutes, depending on how
-  fast the FEC was serving files, and adds about 275 MB.
+  fast the FEC was serving files, and adds about 300 MB.
 - **Reading the files:** memo code X rows don't count toward totals, types 21Y and 22Y are refunds shown as
   positive numbers, and a committee's gift is in the giver's report (`pas2`), so the giver is the first column.
   See the notes at the top of `money/fec.py`.
@@ -123,7 +123,9 @@ office has one page with both, on separate tabs (`?records=state`).
   the row sums beside the reported figures (`itemized_*`), and the `fec` row in `sync_runs` has the overall comparison.
 - **Who:** the delegation is in `data/money_officials.json` under `federal`, checked against the Clerk of the
   House and senate.gov. **Update it when members change** (next: January 2027). Leadership and joint fundraising
-  committees the FEC links to a member are listed but not itemized or counted.
+  committees the FEC links to a member are listed but not itemized or counted. Sitting state officials who ran for
+  Congress are under `federal_runs`: their page opens on state records, with federal ones at `?records=federal`.
+  Add one when an official files. Former legislators' federal campaigns aren't loaded.
 - **Privacy:** ZIP codes are cut to five digits, the committee file's street addresses and treasurer names aren't
   copied, and the same free-text scrubbing as the state data applies. Federal law bars selling donor information
   from FEC reports or using it to solicit or for any commercial purpose (52 U.S.C. § 30111(a)(4)).

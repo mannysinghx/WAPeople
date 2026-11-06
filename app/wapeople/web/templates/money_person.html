@@ -6,7 +6,7 @@
 {% block robots %}{% if noindex %}<meta name="robots" content="noindex">{% endif %}{% endblock %}
 {% block content %}
 {% set roll = p.rollup or {} %}
-{% set src = "records=state&" if p.fec_candidate_ids else "" %}
+{% set src = "records=state&" if p.kind == "federal" and p.fec_candidate_ids else "" %}
 <nav class="crumbs" aria-label="Breadcrumb"><a href="/money">Money trails</a> › {{ p.name }}</nav>
 <section class="card">
   <div class="member-head">
@@ -22,10 +22,15 @@
   </div>
 </section>
 
-{% if src %}
+{% if p.fec_candidate_ids %}
 <nav class="tabs" aria-label="Source of records">
+  {% if src %}
   <a href="/money/{{ p.id }}">Federal campaigns <span class="count">{{ p.fed_raised | usd_short }}, FEC</span></a>
-  <a href="/money/{{ p.id }}?records=state" aria-current="page">Earlier state campaigns <span class="count">PDC</span></a>
+  <a href="/money/{{ p.id }}?records=state" aria-current="page">Earlier state and local campaigns <span class="count">PDC</span></a>
+  {% else %}
+  <a href="/money/{{ p.id }}" aria-current="page">State and local campaigns <span class="count">PDC</span></a>
+  <a href="/money/{{ p.id }}?records=federal">Campaigns for Congress <span class="count">{{ p.fed_raised | usd_short }}, FEC</span></a>
+  {% endif %}
 </nav>
 {% endif %}
 {% if not p.n_campaigns %}
@@ -57,7 +62,7 @@
 <div class="grid-2">
   <section class="card">
     <h2>Where the money came from</h2>
-    {% if roll.by_source %}{{ hbars(roll.by_source, "type", 1, link=None) }}{% else %}<p class="muted">No itemized contributions on record.</p>{% endif %}
+    {% if roll.by_source %}{{ hbars(roll.by_source, "type", 1, link=None, everything=True) }}{% else %}<p class="muted">No itemized contributions on record.</p>{% endif %}
     {% set misc = roll.by_source | default([], true) | selectattr("type", "equalto", "Miscellaneous receipts") | list %}
     {% if misc and misc[0].total > 0 %}<p class="small muted" style="margin:.75rem 0 0">Miscellaneous receipts aren't gifts. They're often the candidate's own money moving from an earlier campaign or surplus account, so it's counted again in the campaign that receives it, plus interest and refunds.</p>{% endif %}
     {% set own = roll.by_source | default([], true) | selectattr("type", "equalto", "Transfers from the candidate's own accounts") | list %}
@@ -66,7 +71,8 @@
   </section>
   <section class="card">
     <h2>Where the money went</h2>
-    {% if roll.by_spend %}{{ hbars(roll.by_spend, "category", 2) }}{% else %}<p class="muted">No itemized spending on record.</p>{% endif %}
+    {% if roll.by_spend %}{{ hbars(roll.by_spend, "category", 2, everything=True) }}{% else %}<p class="muted">No itemized spending on record.</p>{% endif %}
+    {% if roll.by_spend | default([], true) | selectattr("category", "equalto", "In-kind gifts (goods or services, not cash)") | list %}<p class="small muted" style="margin:.75rem 0 0">In-kind gifts are goods or services someone gave the campaign. Campaigns report them as money in and money out, so no cash was paid.</p>{% endif %}
     <p class="small muted" style="margin:.75rem 0 0"><a href="?{{ src }}view=spending">See every expense →</a></p>
   </section>
 </div>
@@ -80,9 +86,9 @@
     {% for k in campaigns %}
     <tr>
       <td><a href="?{{ src }}view=contributions&amp;year={{ k.election_year }}" rel="nofollow"><strong>{{ k.election_year }}</strong></a></td>
-      <td data-label="Race">{{ k.office | office_label }}{% if k.district %}, District {{ k.district }}{% endif %}{% if k.position %} <span class="muted small">({{ k.position | position_label }})</span>{% endif %}{% if k.reporting_option == "mini" %}<div class="small muted">Mini reporting: no itemized records</div>{% endif %}</td>
+      <td data-label="Race">{{ k.office | office_label }}{% if k.district %}, District {{ k.district }}{% endif %}{% if k.position %} <span class="muted small">({{ k.position | position_label }})</span>{% endif %}{% if k.jurisdiction and not k.district and k.jurisdiction != "State of Washington" and not k.jurisdiction.startswith("LEG DISTRICT") %}<div class="small muted">{{ k.jurisdiction }}</div>{% endif %}{% if k.reporting_option == "mini" %}<div class="small muted">Mini reporting: no itemized records</div>{% endif %}</td>
       <td data-label="Result">{{ k.general_status or k.primary_status or "—" }}</td>
-      <td data-label="Raised" class="num">{{ k.contributions | usd_blank }}</td>
+      <td data-label="Raised" class="num">{{ k.contributions | usd_blank }}{% if k.carryforward %}<div class="small muted">plus {{ k.carryforward | usd }} carried over</div>{% endif %}{% if k.loans %}<div class="small muted">plus {{ k.loans | usd }} in loans</div>{% endif %}</td>
       <td data-label="Spent" class="num">{{ k.expenditures | usd_blank }}</td>
       <td data-label="Debts" class="num">{{ k.debts | usd_blank }}</td>
       <td data-label="Outside" class="num">{{ k.ie_for | usd_blank }} / {{ k.ie_against | usd_blank }}</td>
@@ -98,10 +104,11 @@
   <section class="card">
     <h2>Top organizations</h2>
     {% if roll.top_orgs %}{{ hbars(roll.top_orgs, "name", 1, limit=15, link=org_link) }}{% else %}<p class="muted">None on record.</p>{% endif %}
-    <p class="small muted" style="margin:.75rem 0 0">Individual donors are listed under <a href="?{{ src }}view=contributions">Contributions</a>.</p>
+    <p class="small muted" style="margin:.75rem 0 0">Individual donors, and names we can't tell from an individual's, are listed under <a href="?{{ src }}view=contributions">Contributions</a>.</p>
   </section>
   <section class="card">
     <h2>Where donors are</h2>
+    {% if not roll.by_city and not roll.by_state and not p.not_stated > 0 %}<p class="muted">None on record.</p>{% endif %}
     {% if roll.by_city %}<h3>Top cities</h3>{{ hbars(roll.by_city, "city", 1, limit=10) }}{% endif %}
     {% if roll.by_state %}<h3 style="margin-top:1rem">Outside Washington</h3>{{ hbars(roll.by_state, "state", 1, limit=8) }}{% endif %}
     {% if p.not_stated > 0 %}<p class="small muted" style="margin:.75rem 0 0">{{ p.not_stated | usd }} has no stated location, mostly small gifts that campaigns report as one lump sum.</p>{% endif %}
@@ -117,6 +124,7 @@
   <section class="card">
     <h2>Who the campaigns paid</h2>
     {% if roll.top_payees %}{{ hbars(roll.top_payees, "name", 2, limit=12) }}{% else %}<p class="muted">None on record.</p>{% endif %}
+    <p class="small muted" style="margin:.75rem 0 0">Payments only. In-kind gifts aren't payments, so their givers aren't in this list.</p>
   </section>
 </div>
 
@@ -151,7 +159,7 @@
     <tbody>
     {% for d in individuals %}
     <tr>
-      <td><a href="?{{ src }}view=contributions&amp;donor={{ d.key | urlencode }}" rel="nofollow">{{ d.name }}</a></td>
+      <td><a href="?{{ src }}view=contributions&amp;donor={{ d.key | urlencode }}{% if d.state and d.state | length == 2 %}&amp;state={{ d.state | urlencode }}{% endif %}" rel="nofollow">{{ d.name }}</a></td>
       <td data-label="Employer">{{ d.employer or "—" }}{% if d.occupation %} <span class="muted small">({{ d.occupation }})</span>{% endif %}</td>
       <td data-label="Place">{{ d.city or "" }}{% if d.city and d.state %}, {% endif %}{{ d.state or "" }}</td>
       <td data-label="Total" class="num">{{ d.total | usd }}</td>
@@ -172,7 +180,7 @@
   {% for x in listing.items %}
   <tr>
     <td class="nowrap">{{ x.receipt_date | date }}</td>
-    <td class="desc">{% if x.is_org and x.contributor_key %}<a href="/money/organizations/{{ x.contributor_key | org_slug }}"><strong>{{ x.contributor_name }}</strong></a>{% else %}<strong>{{ x.contributor_name }}</strong>{% endif %}<span class="sub">{{ x.source_type }}</span></td>
+    <td class="desc">{% if x.contributor_key in org_pages %}<a href="/money/organizations/{{ x.contributor_key | org_slug }}"><strong>{{ x.contributor_name }}</strong></a>{% else %}<strong>{{ x.contributor_name }}</strong>{% endif %}<span class="sub">{{ x.source_type }}</span></td>
     <td data-label="Place">{{ x.city or "" }}{% if x.city and x.state %}, {% endif %}{{ x.state or "" }}{% if x.zip %} {{ x.zip }}{% endif %}{% if not x.city and not x.state %}<span class="muted">Not stated</span>{% endif %}</td>
     <td data-label="Employer">{{ x.employer or "—" }}{% if x.occupation %}<div class="muted small">{{ x.occupation }}</div>{% endif %}{% if x.employer_city %}<div class="muted small">{{ x.employer_city }}{% if x.employer_state %}, {{ x.employer_state }}{% endif %}</div>{% endif %}</td>
     <td data-label="Amount" class="num"><strong>{{ x.amount | usd_cents }}</strong></td>
@@ -208,7 +216,7 @@
   {% for x in listing.items %}
   <tr>
     <td class="nowrap">{{ x.expenditure_date | date }}</td>
-    <td class="desc"><strong>{{ x.recipient_name or "Not itemized" }}</strong><span class="sub">{{ x.election_year }} campaign</span></td>
+    <td class="desc"><strong>{{ x.recipient_name or "Not itemized" }}</strong><span class="sub">{{ x.election_year }} campaign{% if x.category == "In-kind gifts (goods or services, not cash)" %} · gave this, wasn't paid{% endif %}</span></td>
     <td data-label="Place">{{ x.recipient_city or "" }}{% if x.recipient_city and x.recipient_state %}, {% endif %}{{ x.recipient_state or "" }}</td>
     <td data-label="For">{{ x.category }}{% if x.description and x.description != x.category %}<div class="muted small">{{ x.description }}</div>{% endif %}</td>
     <td data-label="Amount" class="num"><strong>{{ x.amount | usd_cents }}</strong></td>
@@ -230,7 +238,7 @@
   <tr>
     <td class="nowrap">{{ x.receipt_date | date }}</td>
     <td class="desc"><strong>{{ x.lender_name or "Not stated" }}</strong><span class="sub">{{ x.lender_or_endorser or "" }}{% if x.lender_city %} · {{ x.lender_city }}{% if x.lender_state %}, {{ x.lender_state }}{% endif %}{% endif %}{% if x.lender_employer %} · {{ x.lender_employer }}{% endif %}</span></td>
-    <td data-label="Terms">{{ x.transaction_type or "" }}{% if x.repayment_schedule %}<div class="muted small">{{ x.repayment_schedule }}</div>{% endif %}{% if x.loan_due_date %}<div class="muted small">Due {{ x.loan_due_date | date }}</div>{% endif %}</td>
+    <td data-label="Terms">{{ x.transaction_type or "" }}{% if x.carry_forward == "Yes" %}<div class="muted small">Carried over from an earlier report</div>{% endif %}{% if x.repayment_schedule %}<div class="muted small">{{ x.repayment_schedule }}</div>{% endif %}{% if x.loan_due_date %}<div class="muted small">Due {{ x.loan_due_date | date }}</div>{% endif %}</td>
     <td data-label="Amount" class="num"><strong>{{ x.amount | usd_cents }}</strong></td>
     <td data-label="Report">{% if x.url %}<a href="{{ x.url }}" rel="noopener nofollow">PDC ↗</a>{% endif %}</td>
   </tr>{% endfor %}</tbody>
@@ -271,14 +279,14 @@
 <p class="muted">Money spent to support or oppose {{ p.name }} by others, without coordinating with the campaign. This table comes from itemized PDC C-6 reports that name the candidate; the campaign's filing totals on the Overview tab can differ because some committees report this spending on other forms. A row can combine several reports, and its link opens one of them.</p>
 {% if by_sponsor %}
 <div class="table-wrap"><table class="rtable">
-  <thead><tr><th scope="col">Year</th><th scope="col">Paid for by</th><th scope="col">Position</th><th scope="col" class="num">Amount for this candidate</th><th scope="col">Dates</th><th scope="col">Report</th></tr></thead>
+  <thead><tr><th scope="col">Year</th><th scope="col">Paid for by</th><th scope="col">Position</th><th scope="col" class="num">Amount for this candidate</th><th scope="col">Reports filed</th><th scope="col">Report</th></tr></thead>
   <tbody>{% for x in by_sponsor %}
   <tr>
     <td>{{ x.election_year }}</td>
     <td class="desc"><strong>{{ x.sponsor_name }}</strong></td>
     <td data-label="Position"><span class="badge {{ 'tone-law' if x.for_or_against == 'For' else 'tone-bad' }}">{{ x.for_or_against or "—" }}</span></td>
     <td data-label="Amount" class="num">{{ x.total | usd_cents }}</td>
-    <td data-label="Dates" class="nowrap">{{ x.first_date | date }}{% if x.last_date != x.first_date %} – {{ x.last_date | date }}{% endif %}</td>
+    <td data-label="Reports filed" class="nowrap">{{ x.first_date | date }}{% if x.last_date != x.first_date %} – {{ x.last_date | date }}{% endif %}</td>
     <td data-label="Report">{% if x.url %}<a href="{{ x.url }}" rel="noopener nofollow">PDC ↗</a>{% endif %}</td>
   </tr>{% endfor %}</tbody>
 </table></div>

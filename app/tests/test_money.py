@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from wapeople.money import clean as C
-from wapeople.money.disclosure import from_json, sanitize
+from wapeople.money.disclosure import family_names, from_json, sanitize
 from wapeople.money.link import first_name_matches, group_by_person, link_member, name_tokens
 from wapeople.money.sync import CAMPAIGN_SELECT, ITEM_SETS, load_roster
 
@@ -216,8 +216,85 @@ def test_counts_and_ordinary_text_are_not_mistaken_for_addresses(value):
     assert C.free_text(value) == value
 
 
-def test_a_po_box_without_a_number_only_loses_the_box():
-    assert C.free_text("PO BOX RENTAL") == "[address removed] RENTAL"
+@pytest.mark.parametrize("value", [
+    "PO BOX RENTAL",                # an expense, with no address in it
+    "USPS PO BOXES ONLINE",
+    "PO Box service fee",
+    "Mailer (100,000 ct)",          # a count
+    "2,500 ct mailers",
+    "INV AB12345",
+])
+def test_what_only_mentions_a_box_or_a_count_keeps_its_words(value):
+    assert C.free_text(value) == value
+
+
+@pytest.mark.parametrize("raw,gone,kept", [
+    ("PO BOX", "BOX", ""),
+    ("Mail to P.O. Box, Seattle", "Box", "Seattle"),
+    ("PO BOX 12066", "12066", ""),
+    ("POBOX123", "123", ""),
+    ("annual fee Mail Box Center 1234 E. Sprague Spokane Valley, WA99216", "Sprague", "annual fee"),
+    ("Event Invitations - Paperless Post123 Broadway New York, NY 10001", "Broadway", "Paperless Post"),
+    ("USPS (1234 S. Pine Tacoma, WA) 1,000 Postage stamps", "Pine", "Postage stamps"),
+])
+def test_an_address_still_goes(raw, gone, kept):
+    s = C.free_text(raw)
+    assert gone not in s and kept in s and "[address removed]" in s
+
+
+def test_a_house_number_and_directional_after_a_name_goes():
+    assert C.person_name("TILSTRA M DIANE 1234 N") == "TILSTRA M DIANE"
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("NEW DIRECTION PAC 123 Main St", "NEW DIRECTION PAC"),
+    ("NEW DIRECTION PAC PO BOX 12", "NEW DIRECTION PAC"),
+    ("Acme 206-555-0142", "Acme"),
+    ("Acme Printing", "Acme Printing"),
+    ("PO BOX 12", None),
+    (None, None),
+])
+def test_names_in_lists_lose_the_marker_too(raw, expected):
+    assert C.name_text(raw) == expected
+
+
+@pytest.mark.parametrize("name", ["AMARJIT SINGH", "EUNDUK CHOI", "BAKHTIAR A PRIBADI", "Candace Inagi", "MOSS ADAMS"])
+def test_a_plain_name_could_be_a_person_whatever_the_given_name_list_knows(name):
+    assert C.could_be_a_person(name)
+
+
+@pytest.mark.parametrize("name", ["Boeing Company", "IBEW LOCAL 76", "WA Realtors PAC", "515 Park Place LLC", "MICROSOFT",
+                                  "Washington State Dental Political Action Committee", "Tom & Jerry's"])
+def test_a_name_that_says_what_it_is_could_not(name):
+    assert not C.could_be_a_person(name)
+
+
+def test_only_a_plain_name_giving_widely_is_searchable():
+    assert C.keep_out_of_search("AMARJIT SINGH", 250, 1)
+    assert C.keep_out_of_search("AMARJIT SINGH", 6000, 2)
+    assert not C.keep_out_of_search("ANHEUSER BUSCH", 235000, 40)
+    assert C.keep_out_of_search("Candace Inagi", 235000, 40)     # a name we know is a person's stays out at any level
+    assert not C.keep_out_of_search("WA Realtors PAC", 100, 1)
+
+
+@pytest.mark.parametrize("name,own,expected", [
+    ("PAM ROACH SENATE TRANSFER", {"PAM", "ROACH"}, True),
+    ("FRIENDS OF PAM ROACH (SENATE TRANSFER)", {"PAM", "ROACH"}, True),
+    ("ROACH TRANSFER", {"PAM", "ROACH"}, False),            # could be a moving company
+    ("ROACH TRANSFER AND STORAGE LLC", {"PAM", "ROACH"}, False),
+])
+def test_a_senate_transfer_is_the_candidates_own_account(name, own, expected):
+    assert C.own_account(name, frozenset(own)) is expected
+
+
+def test_a_misspelled_party_gift_is_not_a_surplus_transfer():
+    label = C.spend_category(None, "Surplus funds transfer", "HOUSE DEMOCRACTIC CAMPAIGN COMMITTEE")
+    assert label == C.PARTY_TRANSFER
+
+
+@pytest.mark.parametrize("code,description", [("Inkind contribution", None), ("In-Kind Contribution", "MAILER"), (None, "in-kind mailer")])
+def test_in_kind_gifts_say_they_are_not_cash(code, description):
+    assert C.spend_category(code, description) == C.IN_KIND
 
 
 @pytest.mark.parametrize("value", ["jane@example.com", "425-736-9043"])
@@ -567,6 +644,47 @@ def test_judges_property_locations_are_withheld():
     d = sanitize(raw)
     assert d["location_withheld"] is True
     assert d["real_estate"][0]["city"] is None and d["real_estate"][0]["county"] is None
+
+
+def _named_statement(name, source, spouse=None):
+    return {"person": {"name": name}, "statement": {"spouse": spouse, "income": {"data": [
+        {"who": ["filer"], "name": source, "why": "Wages", "income": "30000-59999"}]}}}
+
+
+def test_a_spouse_named_on_another_statement_is_removed_from_this_one():
+    raw = _named_statement("David Stuebe", "Paula Rivers Consulting")
+    assert sanitize(raw)["income"][0]["source"] == "Paula Rivers Consulting"
+    assert "Rivers" not in sanitize(raw, ["Paula Rivers"])["income"][0]["source"]
+
+
+def test_family_names_come_from_both_fields():
+    raw = {"statement": {"spouse": "Pat Doe", "dependents": [{"name": "Sam Doe"}]}}
+    assert family_names(raw) == ["Pat Doe", "Sam Doe"]
+
+
+def test_a_nickname_before_a_family_surname_goes_too():
+    raw = _named_statement("Sam Quill", "Tina Marsh ND, LAc, PLLC", spouse="Christina Marsh")
+    source = sanitize(raw)["income"][0]["source"]
+    assert "Tina" not in source and "Marsh" not in source and "PLLC" in source
+
+
+@pytest.mark.parametrize("official,source,gone", [
+    ("Rob Kretz", "Maria Kretz Family Trust", "Maria"),
+    ("Dan Quill", "LINDA QUILL", "LINDA"),
+])
+def test_someone_else_with_the_officials_surname_goes(official, source, gone):
+    assert gone not in sanitize(_named_statement(official, source))["income"][0]["source"]
+
+
+@pytest.mark.parametrize("official,source", [
+    ("Natasha Hill", "Capitol Hill Bank"),          # not a given name
+    ("Denny Heck", "DENNIS L. HECK"),               # the official
+    ("Steve Hobbs", "Steven Hobbs Consulting"),
+    ("Robert Quill", "Bob Quill LLC"),
+    ("Dan Smith", "Smith Barney"),
+])
+def test_the_official_and_places_with_their_surname_stay(official, source):
+    assert sanitize(_named_statement(official, source))["income"][0]["source"] == source
 
 
 def test_from_json_handles_older_filings():
